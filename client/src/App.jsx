@@ -89,7 +89,7 @@ export default function App() {
           type="button"
           onClick={() => setIsDarkMode((previous) => !previous)}
         >
-          {isDarkMode ? 'Light Mode' : 'Dark Mode'}
+          {isDarkMode ? '☀️' : '🌙'}
         </button>
       </div>
 
