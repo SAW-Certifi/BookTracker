@@ -158,8 +158,11 @@
 }
 
 .table-actions {
-  display: flex;
-  gap: 10px;
+  white-space: nowrap;
+}
+
+.table-actions .link-button + .link-button {
+  margin-left: 10px;
 }
 
 .link-button {
