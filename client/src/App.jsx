@@ -14,6 +14,19 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [selectedBook, setSelectedBook] = useState(null)
+  const [isDarkMode, setIsDarkMode] = useState(false)
+
+  useEffect(() => {
+    const storedTheme = localStorage.getItem('theme')
+    if (storedTheme === 'dark') {
+      setIsDarkMode(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    document.body.classList.toggle('dark-mode', isDarkMode)
+    localStorage.setItem('theme', isDarkMode ? 'dark' : 'light')
+  }, [isDarkMode])
 
   const fetchBooks = async () => {
     try {
@@ -69,7 +82,16 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <h1 className="app-title">BookTracker</h1>
+      <div className="app-header">
+        <h1 className="app-title">BookTracker</h1>
+        <button
+          className="theme-toggle"
+          type="button"
+          onClick={() => setIsDarkMode((previous) => !previous)}
+        >
+          {isDarkMode ? 'Light Mode' : 'Dark Mode'}
+        </button>
+      </div>
 
       <div className="panel">
         <h2 className="panel-title">{selectedBook ? 'Edit Book' : 'Add a Book'}</h2>
