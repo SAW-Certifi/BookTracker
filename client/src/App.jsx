@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api } from './lib/api'
 import './App.css'
 import BookForm from './components/BookForm'
 import BooksTable from './components/BooksTable'
+
+const PAGE_SIZE = 5
 
 const normalizeBook = (book) => {
   const { _id: id, ...rest } = book
@@ -16,6 +18,15 @@ export default function App() {
   const [selectedBook, setSelectedBook] = useState(null)
   const [bookPendingDeletion, setBookPendingDeletion] = useState(null)
   const [isDarkMode, setIsDarkMode] = useState(false)
+  const [searchInput, setSearchInput] = useState('')
+  const [searchTerm, setSearchTerm] = useState('')
+  const [ratingFilter, setRatingFilter] = useState('all')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [paginationInfo, setPaginationInfo] = useState({
+    page: 1,
+    totalPages: 1,
+    total: 0
+  })
 
   useEffect(() => {
     const storedTheme = localStorage.getItem('theme')
@@ -29,27 +40,42 @@ export default function App() {
     localStorage.setItem('theme', isDarkMode ? 'dark' : 'light')
   }, [isDarkMode])
 
-  const fetchBooks = async () => {
+  const fetchBooks = useCallback(async (pageToLoad = 1) => {
     try {
       setIsLoading(true)
-      const { data } = await api.get('/api/books')
-      setBookList(data.map(normalizeBook))
+      const params = { page: pageToLoad, limit: PAGE_SIZE }
+      if (searchTerm.trim()) params.search = searchTerm.trim()
+      if (ratingFilter !== 'all') params.minRating = ratingFilter
+      const { data } = await api.get('/api/books', { params })
+      const books = Array.isArray(data.data) ? data.data : []
+      setBookList(books.map(normalizeBook))
+      if (data.pagination) {
+        setPaginationInfo(data.pagination)
+        setCurrentPage(data.pagination.page)
+      } else {
+        setPaginationInfo({ page: 1, totalPages: 1, total: books.length })
+        setCurrentPage(1)
+      }
       setLoadError('')
     } catch {
       setLoadError('Failed to load books')
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [ratingFilter, searchTerm])
 
   useEffect(() => {
-    fetchBooks()
-  }, [])
+    fetchBooks(currentPage)
+  }, [currentPage, fetchBooks])
 
   const createBook = async (bookPayload) => {
     try {
-      const { data } = await api.post('/api/books', bookPayload)
-      setBookList((previousBooks) => [normalizeBook(data), ...previousBooks])
+      await api.post('/api/books', bookPayload)
+      if (currentPage !== 1) {
+        setCurrentPage(1)
+      } else {
+        await fetchBooks(1)
+      }
     } catch {
       alert('Create failed')
     }
@@ -58,11 +84,8 @@ export default function App() {
   const updateBook = async (bookPayload) => {
     if (!selectedBook) return
     try {
-      const { data } = await api.put(`/api/books/${selectedBook.id}`, bookPayload)
-      const updatedBook = normalizeBook(data)
-      setBookList((previousBooks) =>
-        previousBooks.map((book) => (book.id === updatedBook.id ? updatedBook : book))
-      )
+      await api.put(`/api/books/${selectedBook.id}`, bookPayload)
+      await fetchBooks(currentPage)
       setSelectedBook(null)
     } catch {
       alert('Update failed')
@@ -82,14 +105,30 @@ export default function App() {
     const bookToRemove = bookPendingDeletion
     try {
       await api.delete(`/api/books/${bookToRemove.id}`)
-      setBookList((previousBooks) =>
-        previousBooks.filter((book) => book.id !== bookToRemove.id)
-      )
+      await fetchBooks(currentPage)
     } catch {
       alert('Delete failed')
     } finally {
       setBookPendingDeletion(null)
     }
+  }
+
+  const handleSearchSubmit = (event) => {
+    event.preventDefault()
+    setSearchTerm(searchInput.trim())
+    setCurrentPage(1)
+  }
+
+  const handleRatingFilterChange = (event) => {
+    setRatingFilter(event.target.value)
+    setCurrentPage(1)
+  }
+
+  const handleClearFilters = () => {
+    setSearchInput('')
+    setSearchTerm('')
+    setRatingFilter('all')
+    setCurrentPage(1)
   }
 
   return (
@@ -116,14 +155,65 @@ export default function App() {
 
       <div className="panel">
         <h2 className="panel-title">Books</h2>
+        <div className="list-controls">
+          <form className="filter-form" onSubmit={handleSearchSubmit}>
+            <input
+              type="text"
+              className="form-input search-input"
+              placeholder="Search by title or author"
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+            />
+            <select
+              className="form-input filter-select"
+              value={ratingFilter}
+              onChange={handleRatingFilterChange}
+            >
+              <option value="all">All ratings</option>
+              <option value="4">4+ stars</option>
+              <option value="3">3+ stars</option>
+              <option value="2">2+ stars</option>
+              <option value="1">1+ stars</option>
+            </select>
+            <button className="btn btn-primary" type="submit">Search</button>
+            <button className="btn btn-secondary" type="button" onClick={handleClearFilters}>
+              Reset
+            </button>
+          </form>
+        </div>
         {isLoading ? <p>Loading…</p> : loadError ? (
           <p className="text-error">{loadError}</p>
         ) : (
-          <BooksTable
-            books={bookList}
-            onEditBook={setSelectedBook}
-            onDeleteBook={requestDeleteBook}
-          />
+          <>
+            <BooksTable
+              books={bookList}
+              onEditBook={setSelectedBook}
+              onDeleteBook={requestDeleteBook}
+            />
+            <div className="pagination-controls">
+              <button
+                className="btn btn-secondary"
+                type="button"
+                disabled={currentPage <= 1}
+                onClick={() => setCurrentPage((previous) => Math.max(1, previous - 1))}
+              >
+                Previous
+              </button>
+              <span className="pagination-info">
+                Page {paginationInfo.page} of {paginationInfo.totalPages}
+              </span>
+              <button
+                className="btn btn-secondary"
+                type="button"
+                disabled={paginationInfo.page >= paginationInfo.totalPages}
+                onClick={() =>
+                  setCurrentPage((previous) => previous + 1)
+                }
+              >
+                Next
+              </button>
+            </div>
+          </>
         )}
       </div>
 

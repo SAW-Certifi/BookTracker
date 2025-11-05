@@ -1,5 +1,5 @@
 export default function BooksTable({ books, onEditBook, onDeleteBook }) {
-  if (!books.length) return <p className="muted-text">No books yet. Add one!</p>
+  if (!books.length) return <p className="muted-text">No books found.</p>
   return (
     <table className="data-table">
       <thead>

@@ -1,11 +1,51 @@
 const router = require('express').Router()
 const Book = require('../models/Book')
 
-// get all
-router.get('/', async (_req, res, next) => {
+// get all with basic search, filter, and pagination
+router.get('/', async (req, res, next) => {
   try {
-    const books = await Book.find().sort({ createdAt: -1 })
-    res.json(books)
+    const {
+      search = '',
+      minRating,
+      maxRating,
+      page = 1,
+      limit = 10
+    } = req.query
+
+    const parsedLimit = Math.min(50, Math.max(1, parseInt(limit, 10) || 10))
+    const parsedPage = Math.max(1, parseInt(page, 10) || 1)
+    const filters = {}
+
+    if (search.trim()) {
+      const expression = new RegExp(search.trim(), 'i')
+      filters.$or = [{ title: expression }, { author: expression }]
+    }
+
+    if ((minRating ?? '') !== '' || (maxRating ?? '') !== '') {
+      filters.rating = {}
+      if ((minRating ?? '') !== '') filters.rating.$gte = Number(minRating)
+      if ((maxRating ?? '') !== '') filters.rating.$lte = Number(maxRating)
+    }
+
+    const total = await Book.countDocuments(filters)
+    const totalPages = total === 0 ? 1 : Math.ceil(total / parsedLimit)
+    const safePage = Math.min(parsedPage, totalPages)
+    const skip = (safePage - 1) * parsedLimit
+
+    const books = await Book.find(filters)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parsedLimit)
+
+    res.json({
+      data: books,
+      pagination: {
+        page: safePage,
+        limit: parsedLimit,
+        total,
+        totalPages
+      }
+    })
   } catch (err) { next(err) }
 })
 

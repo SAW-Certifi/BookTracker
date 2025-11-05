@@ -160,6 +160,8 @@
   text-align: left;
   border-bottom: 1px solid #e2e8f0;
   color: #1f2937;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .data-table tbody tr:hover {
@@ -196,6 +198,43 @@
   color: #7f1d1d;
 }
 
+.list-controls {
+  margin-bottom: 16px;
+}
+
+.filter-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.filter-form .btn {
+  align-self: center;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 200px;
+}
+
+.filter-select {
+  min-width: 160px;
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.pagination-info {
+  font-weight: 600;
+  color: #475569;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -214,6 +253,7 @@
   max-width: 360px;
   width: 100%;
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.2);
+  word-break: break-word;
 }
 
 .modal-title {
@@ -221,12 +261,14 @@
   font-size: 1.2rem;
   font-weight: 600;
   color: #111827;
+  word-break: break-word;
 }
 
 .modal-message {
   margin: 0 0 16px;
   color: #4b5563;
   font-size: 0.98rem;
+  word-break: break-word;
 }
 
 .modal-actions {
@@ -338,6 +380,10 @@ body.dark-mode .link-button.danger {
 
 body.dark-mode .link-button.danger:hover {
   color: #fecdd3;
+}
+
+body.dark-mode .pagination-info {
+  color: #e2e8f0;
 }
 
 body.dark-mode .modal {
