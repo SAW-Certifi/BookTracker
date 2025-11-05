@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './lib/api'
 import './App.css'
 import BookForm from './components/BookForm'
 import BooksTable from './components/BooksTable'
+
+const DEFAULT_PAGE_SIZE = 5
 
 const normalizeBook = (book) => {
   const { _id: id, ...rest } = book
@@ -20,18 +22,17 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('')
   const [ratingFilter, setRatingFilter] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
-  const [pageSize, setPageSize] = useState(5)
-  const [paginationInfo, setPaginationInfo] = useState({
-    page: 1,
-    totalPages: 1,
-    total: 0
-  })
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const [paginationInfo, setPaginationInfo] = useState({ page: 1, totalPages: 1, total: 0 })
+
+  // refs for layout preservation and simple page cache
+  const listRef = useRef(null)
+  const minHeightRef = useRef(null)
+  const pagesCacheRef = useRef({})
 
   useEffect(() => {
     const storedTheme = localStorage.getItem('theme')
-    if (storedTheme === 'dark') {
-      setIsDarkMode(true)
-    }
+    if (storedTheme === 'dark') setIsDarkMode(true)
   }, [])
 
   useEffect(() => {
@@ -39,32 +40,81 @@ export default function App() {
     localStorage.setItem('theme', isDarkMode ? 'dark' : 'light')
   }, [isDarkMode])
 
-  const fetchBooks = useCallback(async () => {
-    try {
-      setIsLoading(true)
-      const params = { page: currentPage, limit: pageSize }
-      if (searchTerm.trim()) params.search = searchTerm.trim()
-      if (ratingFilter !== 'all') params.minRating = ratingFilter
-      const { data } = await api.get('/api/books', { params })
-      const books = Array.isArray(data.data) ? data.data : []
-      setBookList(books.map(normalizeBook))
-      setPaginationInfo(data.pagination || { page: 1, totalPages: 1, total: books.length })
-      setLoadError('')
-    } catch {
-      setLoadError('Failed to load books')
-    } finally {
-      setIsLoading(false)
-    }
-  }, [currentPage, pageSize, ratingFilter, searchTerm])
+  // Fetch a page and cache it. showLoading controls whether the global
+  // loading indicator is toggled — used so prefetching doesn't show the UI.
+  const fetchAndCache = useCallback(
+    async (pageToLoad = 1, { showLoading = true } = {}) => {
+      if (pagesCacheRef.current[pageToLoad]) return pagesCacheRef.current[pageToLoad]
+      if (showLoading) setIsLoading(true)
+      try {
+        const params = { page: pageToLoad, limit: pageSize }
+        if (searchTerm.trim()) params.search = searchTerm.trim()
+        if (ratingFilter !== 'all') params.minRating = ratingFilter
+        const { data } = await api.get('/api/books', { params })
+        const books = Array.isArray(data.data) ? data.data : []
+        const normalized = books.map(normalizeBook)
+        const pagination = data.pagination || { page: 1, totalPages: 1, total: books.length }
+        pagesCacheRef.current[pageToLoad] = { books: normalized, pagination }
+        if (showLoading) {
+          setBookList(normalized)
+          setPaginationInfo(pagination)
+          setCurrentPage(pagination.page)
+          setLoadError('')
+        }
+        // prefetch next page in background
+        if (pagination.page < pagination.totalPages) {
+          fetchAndCache(pagination.page + 1, { showLoading: false }).catch(() => {})
+        }
+        return pagesCacheRef.current[pageToLoad]
+      } catch (e) {
+        if (showLoading) setLoadError('Failed to load books')
+        return null
+      } finally {
+        if (showLoading) setIsLoading(false)
+      }
+    },
+    [pageSize, ratingFilter, searchTerm]
+  )
+
+  // Load a page using cache when available
+  const loadPage = useCallback(
+    async (pageToLoad = 1) => {
+      const cached = pagesCacheRef.current[pageToLoad]
+      if (cached) {
+        setBookList(cached.books)
+        setPaginationInfo(cached.pagination)
+        setCurrentPage(pageToLoad)
+        // ensure next page is prefetched
+        if (cached.pagination.page < cached.pagination.totalPages) {
+          fetchAndCache(cached.pagination.page + 1, { showLoading: false }).catch(() => {})
+        }
+        return
+      }
+      await fetchAndCache(pageToLoad, { showLoading: true })
+    },
+    [fetchAndCache]
+  )
 
   useEffect(() => {
-    fetchBooks()
-  }, [fetchBooks])
+    loadPage(currentPage)
+  }, [currentPage, loadPage])
+
+  // Clear temporary min-height after load completes
+  useEffect(() => {
+    if (isLoading) return
+    if (!listRef.current || minHeightRef.current == null) return
+    requestAnimationFrame(() => {
+      listRef.current.style.minHeight = ''
+      minHeightRef.current = null
+    })
+  }, [isLoading])
 
   const createBook = async (bookPayload) => {
     try {
       await api.post('/api/books', bookPayload)
-      setCurrentPage(1)
+      pagesCacheRef.current = {}
+      if (currentPage !== 1) setCurrentPage(1)
+      else await fetchAndCache(1, { showLoading: true })
     } catch {
       alert('Create failed')
     }
@@ -74,18 +124,24 @@ export default function App() {
     if (!selectedBook) return
     try {
       await api.put(`/api/books/${selectedBook.id}`, bookPayload)
-      await fetchBooks()
+      pagesCacheRef.current = {}
+      await fetchAndCache(currentPage, { showLoading: true })
       setSelectedBook(null)
     } catch {
       alert('Update failed')
     }
   }
 
+  const requestDeleteBook = (bookToRemove) => setBookPendingDeletion(bookToRemove)
+  const cancelDeleteRequest = () => setBookPendingDeletion(null)
+
   const confirmDeleteBook = async () => {
     if (!bookPendingDeletion) return
+    const bookToRemove = bookPendingDeletion
     try {
-      await api.delete(`/api/books/${bookPendingDeletion.id}`)
-      await fetchBooks()
+      await api.delete(`/api/books/${bookToRemove.id}`)
+      pagesCacheRef.current = {}
+      await fetchAndCache(currentPage, { showLoading: true })
     } catch {
       alert('Delete failed')
     } finally {
@@ -95,16 +151,19 @@ export default function App() {
 
   const handleSearchSubmit = (event) => {
     event.preventDefault()
+    pagesCacheRef.current = {}
     setSearchTerm(searchInput.trim())
     setCurrentPage(1)
   }
 
   const handleRatingFilterChange = (event) => {
+    pagesCacheRef.current = {}
     setRatingFilter(event.target.value)
     setCurrentPage(1)
   }
 
   const handleClearFilters = () => {
+    pagesCacheRef.current = {}
     setSearchInput('')
     setSearchTerm('')
     setRatingFilter('all')
@@ -112,7 +171,9 @@ export default function App() {
   }
 
   const handlePageSizeChange = (event) => {
-    setPageSize(Number(event.target.value))
+    const newSize = Number(event.target.value) || DEFAULT_PAGE_SIZE
+    pagesCacheRef.current = {}
+    setPageSize(newSize)
     setCurrentPage(1)
   }
 
@@ -120,22 +181,14 @@ export default function App() {
     <div className="app-shell">
       <div className="app-header">
         <h1 className="app-title">BookTracker</h1>
-        <button
-          className="theme-toggle"
-          type="button"
-          onClick={() => setIsDarkMode((previous) => !previous)}
-        >
+        <button className="theme-toggle" type="button" onClick={() => setIsDarkMode((p) => !p)}>
           {isDarkMode ? '☀️' : '🌙'}
         </button>
       </div>
 
       <div className="panel">
         <h2 className="panel-title">{selectedBook ? 'Edit Book' : 'Add a Book'}</h2>
-        <BookForm
-          initialBook={selectedBook}
-          onCancel={() => setSelectedBook(null)}
-          onSubmit={selectedBook ? updateBook : createBook}
-        />
+        <BookForm initialBook={selectedBook} onCancel={() => setSelectedBook(null)} onSubmit={selectedBook ? updateBook : createBook} />
       </div>
 
       <div className="panel">
@@ -147,90 +200,80 @@ export default function App() {
               className="form-input search-input"
               placeholder="Search by title or author"
               value={searchInput}
-              onChange={(event) => setSearchInput(event.target.value)}
+              onChange={(e) => setSearchInput(e.target.value)}
             />
-            <select
-              className="form-input filter-select"
-              value={ratingFilter}
-              onChange={handleRatingFilterChange}
-            >
+            <select className="form-input filter-select" value={ratingFilter} onChange={handleRatingFilterChange}>
               <option value="all">All ratings</option>
               <option value="4">4+ stars</option>
               <option value="3">3+ stars</option>
               <option value="2">2+ stars</option>
               <option value="1">1+ stars</option>
             </select>
+            <select className="form-input filter-select" value={pageSize} onChange={handlePageSizeChange}>
+              <option value={5}>5 / page</option>
+              <option value={10}>10 / page</option>
+              <option value={20}>20 / page</option>
+            </select>
             <button className="btn btn-primary" type="submit">Search</button>
-            <button className="btn btn-secondary" type="button" onClick={handleClearFilters}>
-              Reset
-            </button>
+            <button className="btn btn-secondary" type="button" onClick={handleClearFilters}>Reset</button>
           </form>
         </div>
-        {isLoading ? <p>Loading…</p> : loadError ? (
-          <p className="text-error">{loadError}</p>
-        ) : (
-          <>
-            <BooksTable
-              books={bookList}
-              onEditBook={setSelectedBook}
-              onDeleteBook={setBookPendingDeletion}
-            />
-            <div className="pagination-controls">
-              <div className="pagination-left">
-                <label className="pagination-label">
-                  Items per page:
-                  <select
-                    className="form-input pagination-select"
-                    value={pageSize}
-                    onChange={handlePageSizeChange}
+
+        <div ref={listRef}>
+          {isLoading && <p>Loading…</p>}
+
+          {!isLoading && loadError && <p className="text-error">{loadError}</p>}
+
+          {!isLoading && !loadError && (
+            <>
+              <BooksTable books={bookList} onEditBook={setSelectedBook} onDeleteBook={requestDeleteBook} />
+              <div className="pagination-controls">
+                {currentPage > 1 && (
+                  <button
+                    className="btn btn-secondary"
+                    type="button"
+                    onClick={() => {
+                      if (listRef.current) {
+                        minHeightRef.current = listRef.current.offsetHeight
+                        listRef.current.style.minHeight = `${minHeightRef.current}px`
+                      }
+                      setCurrentPage((previous) => Math.max(1, previous - 1))
+                    }}
                   >
-                    <option value="5">5</option>
-                    <option value="10">10</option>
-                    <option value="25">25</option>
-                    <option value="50">50</option>
-                  </select>
-                </label>
-              </div>
-              <div className="pagination-center">
-                <button
-                  className="btn btn-secondary"
-                  type="button"
-                  disabled={currentPage <= 1}
-                  onClick={() => setCurrentPage((prev) => prev - 1)}
-                >
-                  Previous
-                </button>
-                <span className="pagination-info">
-                  Page {paginationInfo.page} of {paginationInfo.totalPages}
-                </span>
+                    Previous
+                  </button>
+                )}
+
+                <span className="pagination-info">Page {paginationInfo.page} of {paginationInfo.totalPages}</span>
+
                 <button
                   className="btn btn-secondary"
                   type="button"
                   disabled={paginationInfo.page >= paginationInfo.totalPages}
-                  onClick={() => setCurrentPage((prev) => prev + 1)}
+                  onClick={() => {
+                    if (listRef.current) {
+                      minHeightRef.current = listRef.current.offsetHeight
+                      listRef.current.style.minHeight = `${minHeightRef.current}px`
+                    }
+                    setCurrentPage((previous) => previous + 1)
+                  }}
                 >
                   Next
                 </button>
               </div>
-            </div>
-          </>
-        )}
+            </>
+          )}
+        </div>
       </div>
 
       {bookPendingDeletion && (
         <div className="modal-backdrop">
           <div className="modal" role="dialog" aria-modal="true">
             <h3 className="modal-title">Delete Book</h3>
-            <p className="modal-message">
-              Are you sure you want to delete &quot;{bookPendingDeletion.title}&quot;?
-            </p>
+            <p className="modal-message">Are you sure you want to delete "{bookPendingDeletion.title}"?</p>
             <div className="modal-actions">
-              <button type="button" className="btn btn-secondary" onClick={() => setBookPendingDeletion(null)}>
-                Cancel
-              </button>
-              <button type="button" className="btn btn-danger" onClick={confirmDeleteBook}>
-                Delete
-              </button>
+              <button type="button" className="btn btn-secondary" onClick={cancelDeleteRequest}>Cancel</button>
+              <button type="button" className="btn btn-danger" onClick={confirmDeleteBook}>Delete</button>
             </div>
           </div>
         </div>
