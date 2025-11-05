@@ -111,6 +111,8 @@ export default function BookForm({ initialBook, onCancel, onSubmit }) {
         <input
           type="number"
           className="form-input"
+          min="0"
+          max="5"
           value={formValues.rating}
           onChange={handleFieldChange('rating')}
         />
