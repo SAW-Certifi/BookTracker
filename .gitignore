@@ -1,5 +1,10 @@
-
-# env files
+# environment files
 .env
-*.env
+.env.*
+client/.env
+client/.env.*
 server/.env
+server/.env.*
+!.env.example
+!client/.env.example
+!server/.env.example
