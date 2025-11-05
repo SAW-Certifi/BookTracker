@@ -4,8 +4,6 @@ import './App.css'
 import BookForm from './components/BookForm'
 import BooksTable from './components/BooksTable'
 
-const PAGE_SIZE = 5
-
 const normalizeBook = (book) => {
   const { _id: id, ...rest } = book
   return { id, ...rest }
@@ -22,6 +20,7 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('')
   const [ratingFilter, setRatingFilter] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(5)
   const [paginationInfo, setPaginationInfo] = useState({
     page: 1,
     totalPages: 1,
@@ -40,42 +39,32 @@ export default function App() {
     localStorage.setItem('theme', isDarkMode ? 'dark' : 'light')
   }, [isDarkMode])
 
-  const fetchBooks = useCallback(async (pageToLoad = 1) => {
+  const fetchBooks = useCallback(async () => {
     try {
       setIsLoading(true)
-      const params = { page: pageToLoad, limit: PAGE_SIZE }
+      const params = { page: currentPage, limit: pageSize }
       if (searchTerm.trim()) params.search = searchTerm.trim()
       if (ratingFilter !== 'all') params.minRating = ratingFilter
       const { data } = await api.get('/api/books', { params })
       const books = Array.isArray(data.data) ? data.data : []
       setBookList(books.map(normalizeBook))
-      if (data.pagination) {
-        setPaginationInfo(data.pagination)
-        setCurrentPage(data.pagination.page)
-      } else {
-        setPaginationInfo({ page: 1, totalPages: 1, total: books.length })
-        setCurrentPage(1)
-      }
+      setPaginationInfo(data.pagination || { page: 1, totalPages: 1, total: books.length })
       setLoadError('')
     } catch {
       setLoadError('Failed to load books')
     } finally {
       setIsLoading(false)
     }
-  }, [ratingFilter, searchTerm])
+  }, [currentPage, pageSize, ratingFilter, searchTerm])
 
   useEffect(() => {
-    fetchBooks(currentPage)
-  }, [currentPage, fetchBooks])
+    fetchBooks()
+  }, [fetchBooks])
 
   const createBook = async (bookPayload) => {
     try {
       await api.post('/api/books', bookPayload)
-      if (currentPage !== 1) {
-        setCurrentPage(1)
-      } else {
-        await fetchBooks(1)
-      }
+      setCurrentPage(1)
     } catch {
       alert('Create failed')
     }
@@ -85,27 +74,18 @@ export default function App() {
     if (!selectedBook) return
     try {
       await api.put(`/api/books/${selectedBook.id}`, bookPayload)
-      await fetchBooks(currentPage)
+      await fetchBooks()
       setSelectedBook(null)
     } catch {
       alert('Update failed')
     }
   }
 
-  const requestDeleteBook = (bookToRemove) => {
-    setBookPendingDeletion(bookToRemove)
-  }
-
-  const cancelDeleteRequest = () => {
-    setBookPendingDeletion(null)
-  }
-
   const confirmDeleteBook = async () => {
     if (!bookPendingDeletion) return
-    const bookToRemove = bookPendingDeletion
     try {
-      await api.delete(`/api/books/${bookToRemove.id}`)
-      await fetchBooks(currentPage)
+      await api.delete(`/api/books/${bookPendingDeletion.id}`)
+      await fetchBooks()
     } catch {
       alert('Delete failed')
     } finally {
@@ -128,6 +108,11 @@ export default function App() {
     setSearchInput('')
     setSearchTerm('')
     setRatingFilter('all')
+    setCurrentPage(1)
+  }
+
+  const handlePageSizeChange = (event) => {
+    setPageSize(Number(event.target.value))
     setCurrentPage(1)
   }
 
@@ -188,30 +173,45 @@ export default function App() {
             <BooksTable
               books={bookList}
               onEditBook={setSelectedBook}
-              onDeleteBook={requestDeleteBook}
+              onDeleteBook={setBookPendingDeletion}
             />
             <div className="pagination-controls">
-              <button
-                className="btn btn-secondary"
-                type="button"
-                disabled={currentPage <= 1}
-                onClick={() => setCurrentPage((previous) => Math.max(1, previous - 1))}
-              >
-                Previous
-              </button>
-              <span className="pagination-info">
-                Page {paginationInfo.page} of {paginationInfo.totalPages}
-              </span>
-              <button
-                className="btn btn-secondary"
-                type="button"
-                disabled={paginationInfo.page >= paginationInfo.totalPages}
-                onClick={() =>
-                  setCurrentPage((previous) => previous + 1)
-                }
-              >
-                Next
-              </button>
+              <div className="pagination-left">
+                <label className="pagination-label">
+                  Items per page:
+                  <select
+                    className="form-input pagination-select"
+                    value={pageSize}
+                    onChange={handlePageSizeChange}
+                  >
+                    <option value="5">5</option>
+                    <option value="10">10</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                  </select>
+                </label>
+              </div>
+              <div className="pagination-center">
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  disabled={currentPage <= 1}
+                  onClick={() => setCurrentPage((prev) => prev - 1)}
+                >
+                  Previous
+                </button>
+                <span className="pagination-info">
+                  Page {paginationInfo.page} of {paginationInfo.totalPages}
+                </span>
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  disabled={paginationInfo.page >= paginationInfo.totalPages}
+                  onClick={() => setCurrentPage((prev) => prev + 1)}
+                >
+                  Next
+                </button>
+              </div>
             </div>
           </>
         )}
@@ -225,7 +225,7 @@ export default function App() {
               Are you sure you want to delete &quot;{bookPendingDeletion.title}&quot;?
             </p>
             <div className="modal-actions">
-              <button type="button" className="btn btn-secondary" onClick={cancelDeleteRequest}>
+              <button type="button" className="btn btn-secondary" onClick={() => setBookPendingDeletion(null)}>
                 Cancel
               </button>
               <button type="button" className="btn btn-danger" onClick={confirmDeleteBook}>
