@@ -1,4 +1,4 @@
-# Environment files
+# environment files
 .env
 .env.*
 client/.env
