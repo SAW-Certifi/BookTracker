@@ -33,6 +33,12 @@ export default function BookForm({ initialBook, onCancel, onSubmit }) {
     const errors = {}
     if (!formValues.title.trim()) errors.title = 'Title is required'
     if (!formValues.author.trim()) errors.author = 'Author is required'
+    if (formValues.year !== '') {
+      const yearValue = Number(formValues.year)
+      if (!Number.isFinite(yearValue) || yearValue < 0 || yearValue > 2025) {
+        errors.year = 'Year must be between 0 and 2025'
+      }
+    }
     if (isRatingOutOfRange(formValues.rating)) errors.rating = 'Rating must be between 0 and 5'
     setValidationErrors(errors)
     return Object.keys(errors).length === 0
@@ -93,9 +99,12 @@ export default function BookForm({ initialBook, onCancel, onSubmit }) {
         <input
           type="number"
           className="form-input"
+          min="0"
+          max="2025"
           value={formValues.year}
           onChange={handleFieldChange('year')}
         />
+        {validationErrors.year && <p className="form-error">{validationErrors.year}</p>}
       </div>
       <div className="form-row">
         <label className="form-label">Rating (0–5)</label>
