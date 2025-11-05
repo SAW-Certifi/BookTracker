@@ -31,8 +31,16 @@ export default function BookForm({ initialBook, onCancel, onSubmit }) {
 
   const validateForm = () => {
     const errors = {}
-    if (!formValues.title.trim()) errors.title = 'Title is required'
-    if (!formValues.author.trim()) errors.author = 'Author is required'
+    if (!formValues.title.trim()) {
+      errors.title = 'Title is required'
+    } else if (formValues.title.length > 150) {
+      errors.title = 'Title must be 150 characters or less'
+    }
+    if (!formValues.author.trim()) {
+      errors.author = 'Author is required'
+    } else if (formValues.author.length > 150) {
+      errors.author = 'Author must be 150 characters or less'
+    }
     if (formValues.year !== '') {
       const yearValue = Number(formValues.year)
       if (!Number.isFinite(yearValue) || yearValue < 0 || yearValue > 2025) {
