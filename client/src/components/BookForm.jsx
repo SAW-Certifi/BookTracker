@@ -23,12 +23,6 @@ export default function BookForm({ initialBook, onCancel, onSubmit }) {
     setValidationErrors({})
   }, [initialBook])
 
-  const isRatingOutOfRange = (ratingValue) => {
-    if (ratingValue === '') return false
-    const parsedRating = Number(ratingValue)
-    return Number.isFinite(parsedRating) && (parsedRating < 0 || parsedRating > 5)
-  }
-
   const validateForm = () => {
     const errors = {}
     if (!formValues.title.trim()) {
@@ -47,7 +41,12 @@ export default function BookForm({ initialBook, onCancel, onSubmit }) {
         errors.year = 'Year must be between 0 and 2025'
       }
     }
-    if (isRatingOutOfRange(formValues.rating)) errors.rating = 'Rating must be between 0 and 5'
+    if (formValues.rating !== '') {
+      const ratingValue = Number(formValues.rating)
+      if (!Number.isFinite(ratingValue) || ratingValue < 0 || ratingValue > 5) {
+        errors.rating = 'Rating must be between 0 and 5'
+      }
+    }
     setValidationErrors(errors)
     return Object.keys(errors).length === 0
   }
@@ -62,19 +61,12 @@ export default function BookForm({ initialBook, onCancel, onSubmit }) {
   const handleSubmit = async (event) => {
     event.preventDefault()
     if (!validateForm()) return
-    try {
-      await onSubmit(buildPayload())
-      if (!initialBook) setFormValues({ ...defaultFormValues })
-    } catch (error) {
-      console.error('BookForm submission failed', error)
-    }
+    await onSubmit(buildPayload())
+    if (!initialBook) setFormValues({ ...defaultFormValues })
   }
 
   const handleFieldChange = (fieldName) => (event) => {
-    setFormValues((previousValues) => ({
-      ...previousValues,
-      [fieldName]: event.target.value
-    }))
+    setFormValues((prev) => ({ ...prev, [fieldName]: event.target.value }))
   }
 
   const handleCancel = () => {
