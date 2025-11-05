@@ -14,6 +14,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [selectedBook, setSelectedBook] = useState(null)
+  const [bookPendingDeletion, setBookPendingDeletion] = useState(null)
   const [isDarkMode, setIsDarkMode] = useState(false)
 
   useEffect(() => {
@@ -68,8 +69,17 @@ export default function App() {
     }
   }
 
-  const deleteBook = async (bookToRemove) => {
-    if (!confirm(`Delete "${bookToRemove.title}"?`)) return
+  const requestDeleteBook = (bookToRemove) => {
+    setBookPendingDeletion(bookToRemove)
+  }
+
+  const cancelDeleteRequest = () => {
+    setBookPendingDeletion(null)
+  }
+
+  const confirmDeleteBook = async () => {
+    if (!bookPendingDeletion) return
+    const bookToRemove = bookPendingDeletion
     try {
       await api.delete(`/api/books/${bookToRemove.id}`)
       setBookList((previousBooks) =>
@@ -77,6 +87,8 @@ export default function App() {
       )
     } catch {
       alert('Delete failed')
+    } finally {
+      setBookPendingDeletion(null)
     }
   }
 
@@ -110,10 +122,29 @@ export default function App() {
           <BooksTable
             books={bookList}
             onEditBook={setSelectedBook}
-            onDeleteBook={deleteBook}
+            onDeleteBook={requestDeleteBook}
           />
         )}
       </div>
+
+      {bookPendingDeletion && (
+        <div className="modal-backdrop">
+          <div className="modal" role="dialog" aria-modal="true">
+            <h3 className="modal-title">Delete Book</h3>
+            <p className="modal-message">
+              Are you sure you want to delete &quot;{bookPendingDeletion.title}&quot;?
+            </p>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={cancelDeleteRequest}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn-danger" onClick={confirmDeleteBook}>
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

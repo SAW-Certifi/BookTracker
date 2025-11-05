@@ -75,7 +75,7 @@ export default function BookForm({ initialBook, onCancel, onSubmit }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="book-form">
+    <form onSubmit={handleSubmit} className="book-form" noValidate>
       <div className="form-row">
         <label className="form-label">Title *</label>
         <input
