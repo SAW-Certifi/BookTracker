@@ -5,7 +5,10 @@ const bookSchema = new Schema({
   title: { type: String, required: true, trim: true, maxlength: 150 },
   author: { type: String, required: true, trim: true, maxlength: 150 },
   year: Number,
-  rating: { type: Number, min: 0, max: 5 }
+  rating: { type: Number, min: 0, max: 5 },
+  communityRating: { type: Number, min: 0, max: 5 },
+  openLibraryWorkKey: { type: String, trim: true },
+  openLibraryEditionKey: { type: String, trim: true }
 }, { timestamps: true })
 
 module.exports = model('Book', bookSchema)

@@ -17,9 +17,22 @@ import BooksTable from './components/BooksTable'
 
 const DEFAULT_PAGE_SIZE = 5
 
+const toOptionalNumber = (value) => {
+  if (value === undefined || value === null || value === '') return null
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : null
+}
+
 const normalizeBook = (book) => {
-  const { _id: id, ...rest } = book
-  return { id, ...rest }
+  const { _id: id, rating, communityRating, ...rest } = book
+  const personalRatingValue = toOptionalNumber(rating)
+  const communityRatingValue = toOptionalNumber(communityRating)
+  return {
+    id,
+    ...rest,
+    personalRating: personalRatingValue,
+    communityRating: communityRatingValue
+  }
 }
 
 export default function App() {
@@ -40,7 +53,6 @@ export default function App() {
   const [recommendationsSource, setRecommendationsSource] = useState('')
   const [isRecommendationsLoading, setIsRecommendationsLoading] = useState(false)
   const [recommendationsError, setRecommendationsError] = useState('')
-  const [aiRawOutput, setAiRawOutput] = useState('')
   const [authUser, setAuthUser] = useState(null)
   const [sortConfig, setSortConfig] = useState({ field: null, direction: 'asc' })
   const [isAuthReady, setIsAuthReady] = useState(false)
@@ -55,6 +67,7 @@ export default function App() {
   const [isRefreshingVerification, setIsRefreshingVerification] = useState(false)
   const [isDeletingAccount, setIsDeletingAccount] = useState(false)
   const [isAccountDeleteModalOpen, setIsAccountDeleteModalOpen] = useState(false)
+  const [knownWorkKeys, setKnownWorkKeys] = useState([])
 
   const listRef = useRef(null)
   const minHeightRef = useRef(null)
@@ -82,8 +95,8 @@ export default function App() {
         setRecommendations([])
         setRecommendationsSource('')
         setRecommendationsError('')
-        setAiRawOutput('')
         setIsLoading(false)
+        setKnownWorkKeys([])
       }
       setIsSendingVerification(false)
       setIsRefreshingVerification(false)
@@ -99,20 +112,17 @@ export default function App() {
       return
     }
     setRecommendationsError('')
-    setAiRawOutput('')
     setIsRecommendationsLoading(true)
     try {
       const { data } = await api.get('/api/recommendations')
       setRecommendations(Array.isArray(data.recommendations) ? data.recommendations.slice(0, 5) : [])
       setRecommendationsSource(data.source || '')
-      setAiRawOutput(data.rawOutput || '')
     } catch (error) {
       const serverMessage = error?.response?.data?.error || 'Could not load recommendations right now.'
       const serverDetails = error?.response?.data?.details
       setRecommendations([])
       setRecommendationsSource('')
       setRecommendationsError(serverDetails ? `${serverMessage} (${serverDetails})` : serverMessage)
-      setAiRawOutput(error?.response?.data?.rawOutput || '')
     } finally {
       setIsRecommendationsLoading(false)
     }
@@ -120,6 +130,7 @@ export default function App() {
 
   useEffect(() => {
     pagesCacheRef.current = {}
+    setKnownWorkKeys([])
     setSearchInput('')
     setSearchTerm('')
     setRatingFilter('all')
@@ -129,7 +140,6 @@ export default function App() {
     setRecommendations([])
     setRecommendationsSource('')
     setRecommendationsError('')
-    setAiRawOutput('')
     if (authUser?.emailVerified) {
       setSortConfig({ field: null, direction: 'asc' })
       setIsLoading(true)
@@ -153,6 +163,17 @@ export default function App() {
     localStorage.setItem('theme', isDarkMode ? 'dark' : 'light')
   }, [isDarkMode])
 
+  const rebuildKnownWorkKeys = useCallback(() => {
+    const keySet = new Set()
+    Object.values(pagesCacheRef.current).forEach((entry) => {
+      if (!entry || !Array.isArray(entry.books)) return
+      entry.books.forEach((book) => {
+        if (book?.openLibraryWorkKey) keySet.add(book.openLibraryWorkKey)
+      })
+    })
+    setKnownWorkKeys(Array.from(keySet))
+  }, [setKnownWorkKeys])
+
   // fetch and cache a page of books
   const fetchAndCache = useCallback(
     async (pageToLoad = 1, { showLoading = true } = {}) => {
@@ -172,6 +193,7 @@ export default function App() {
         const normalized = books.map(normalizeBook)
         const pagination = data.pagination || { page: 1, totalPages: 1, total: books.length }
         pagesCacheRef.current[pageToLoad] = { books: normalized, pagination }
+        rebuildKnownWorkKeys()
         if (showLoading) {
           setBookList(normalized)
           setPaginationInfo(pagination)
@@ -190,7 +212,7 @@ export default function App() {
         if (showLoading) setIsLoading(false)
       }
     },
-    [authUser, pageSize, ratingFilter, searchTerm, sortConfig.field, sortConfig.direction]
+    [authUser, pageSize, ratingFilter, searchTerm, sortConfig.field, sortConfig.direction, rebuildKnownWorkKeys]
   )
 
   // load a page with cache if possible
@@ -232,6 +254,7 @@ export default function App() {
     try {
       await api.post('/api/books', bookPayload)
       pagesCacheRef.current = {}
+      setKnownWorkKeys([])
       if (currentPage !== 1) setCurrentPage(1)
       else await fetchAndCache(1, { showLoading: true })
       setIsFormOpen(false)
@@ -245,6 +268,7 @@ export default function App() {
     try {
       await api.put(`/api/books/${selectedBook.id}`, bookPayload)
       pagesCacheRef.current = {}
+      setKnownWorkKeys([])
       await fetchAndCache(currentPage, { showLoading: true })
       setSelectedBook(null)
       setIsFormOpen(false)
@@ -262,6 +286,7 @@ export default function App() {
     try {
       await api.delete(`/api/books/${bookToRemove.id}`)
       pagesCacheRef.current = {}
+      setKnownWorkKeys([])
       await fetchAndCache(currentPage, { showLoading: true })
     } catch {
       alert('Delete failed')
@@ -382,18 +407,21 @@ export default function App() {
   const handleSearchSubmit = (event) => {
     event.preventDefault()
     pagesCacheRef.current = {}
+    setKnownWorkKeys([])
     setSearchTerm(searchInput.trim())
     setCurrentPage(1)
   }
 
   const handleRatingFilterChange = (event) => {
     pagesCacheRef.current = {}
+    setKnownWorkKeys([])
     setRatingFilter(event.target.value)
     setCurrentPage(1)
   }
 
   const handleClearFilters = () => {
     pagesCacheRef.current = {}
+    setKnownWorkKeys([])
     setSearchInput('')
     setSearchTerm('')
     setRatingFilter('all')
@@ -404,6 +432,7 @@ export default function App() {
   const handlePageSizeChange = (event) => {
     const newSize = Number(event.target.value) || DEFAULT_PAGE_SIZE
     pagesCacheRef.current = {}
+    setKnownWorkKeys([])
     setPageSize(newSize)
     setCurrentPage(1)
   }
@@ -437,13 +466,18 @@ export default function App() {
 
   const handleSortToggle = useCallback((field) => {
     setSortConfig((previous) => {
-      const isSameField = previous.field === field
-      const nextDirection = isSameField && previous.direction === 'asc' ? 'desc' : 'asc'
-      return { field, direction: nextDirection }
+      if (previous.field !== field || !previous.field) {
+        return { field, direction: 'asc' }
+      }
+      if (previous.direction === 'asc') {
+        return { field, direction: 'desc' }
+      }
+      return { field: null, direction: 'asc' }
     })
     pagesCacheRef.current = {}
+    setKnownWorkKeys([])
     setCurrentPage(1)
-  }, [])
+  }, [setKnownWorkKeys])
 
   if (!isAuthReady) {
     return (
@@ -584,7 +618,7 @@ export default function App() {
           <div className="panel-header">
             <div>
               <h2 className="panel-title">Your library</h2>
-              <p className="panel-subtitle">Filter by rating or search.</p>
+              <p className="panel-subtitle">Filter by personal rating or search.</p>
             </div>
             <button
               type="button"
@@ -609,9 +643,9 @@ export default function App() {
                 />
               </div>
               <div className="filter-field">
-                <label className="input-label" htmlFor="rating-filter">Rating</label>
+                <label className="input-label" htmlFor="rating-filter">Personal Rating</label>
                 <select id="rating-filter" className="form-input filter-select" value={ratingFilter} onChange={handleRatingFilterChange}>
-                  <option value="all">All ratings</option>
+                  <option value="all">All personal ratings</option>
                   <option value="4">4+ stars</option>
                   <option value="3">3+ stars</option>
                   <option value="2">2+ stars</option>
@@ -636,7 +670,12 @@ export default function App() {
           <div className={`collapsible ${isFormOpen ? 'is-open' : ''}`} aria-hidden={!isFormOpen}>
             <div className="form-surface">
               <h3 className="form-surface-title">{selectedBook ? 'Edit book' : 'Add a book'}</h3>
-              <BookForm initialBook={selectedBook} onCancel={handleFormCancel} onSubmit={selectedBook ? updateBook : createBook} />
+              <BookForm
+                initialBook={selectedBook}
+                existingWorkKeys={knownWorkKeys}
+                onCancel={handleFormCancel}
+                onSubmit={selectedBook ? updateBook : createBook}
+              />
             </div>
           </div>
 
@@ -737,12 +776,6 @@ export default function App() {
             </ul>
           )}
 
-          {aiRawOutput && (
-            <details className="ai-raw-output">
-              <summary>Show raw AI output</summary>
-              <pre>{aiRawOutput}</pre>
-            </details>
-          )}
         </div>
       </main>
 
