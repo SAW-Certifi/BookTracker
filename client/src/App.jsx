@@ -24,6 +24,11 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [paginationInfo, setPaginationInfo] = useState({ page: 1, totalPages: 1, total: 0 })
+  const [recommendations, setRecommendations] = useState([])
+  const [recommendationsSource, setRecommendationsSource] = useState('')
+  const [isRecommendationsLoading, setIsRecommendationsLoading] = useState(false)
+  const [recommendationsError, setRecommendationsError] = useState('')
+  const [aiRawOutput, setAiRawOutput] = useState('')
 
   const listRef = useRef(null)
   const minHeightRef = useRef(null)
@@ -174,6 +179,27 @@ export default function App() {
     setCurrentPage(1)
   }
 
+  const fetchRecommendations = async () => {
+    setRecommendationsError('')
+    setAiRawOutput('')
+    setIsRecommendationsLoading(true)
+    try {
+      const { data } = await api.get('/api/recommendations')
+      setRecommendations(Array.isArray(data.recommendations) ? data.recommendations.slice(0, 5) : [])
+      setRecommendationsSource(data.source || '')
+      setAiRawOutput(data.rawOutput || '')
+    } catch (error) {
+      const serverMessage = error?.response?.data?.error || 'Could not load recommendations right now.'
+      const serverDetails = error?.response?.data?.details
+      setRecommendations([])
+      setRecommendationsSource('')
+      setRecommendationsError(serverDetails ? `${serverMessage} (${serverDetails})` : serverMessage)
+      setAiRawOutput(error?.response?.data?.rawOutput || '')
+    } finally {
+      setIsRecommendationsLoading(false)
+    }
+  }
+
   return (
     <div className="app-shell">
       <div className="app-header">
@@ -181,6 +207,50 @@ export default function App() {
         <button className="theme-toggle" type="button" onClick={() => setIsDarkMode((p) => !p)}>
           {isDarkMode ? '☀️' : '🌙'}
         </button>
+      </div>
+
+      <div className="panel">
+        <h2 className="panel-title">AI recommendations</h2>
+        <p className="panel-description">We analyze your logged books and ratings, then ask our AI to queue up 3-5 fresh reads.</p>
+        <div className="recommendations-actions">
+          <button
+            className="btn btn-primary"
+            type="button"
+            disabled={isRecommendationsLoading}
+            onClick={fetchRecommendations}
+          >
+            {isRecommendationsLoading ? 'Asking AI...' : 'Ask AI for suggestions'}
+          </button>
+          {recommendationsSource && !recommendationsError && recommendations.length > 0 && (
+            <span className="recommendations-source">
+              Source: {recommendationsSource.startsWith('ai') ? 'AI model' : recommendationsSource}
+            </span>
+          )}
+        </div>
+        {recommendationsError && <p className="text-error">{recommendationsError}</p>}
+        {!recommendationsError && !isRecommendationsLoading && recommendations.length === 0 && (
+          <p className="muted-text">Click the button to get personalized picks.</p>
+        )}
+        {recommendations.length > 0 && (
+          <ul className="recommendations-list">
+            {recommendations.map((item, index) => (
+              <li className="recommendation-item" key={`${item.title}-${index}`}>
+                <div className="recommendation-rank">#{index + 1}</div>
+                <div>
+                  <p className="recommendation-title">{item.title || 'Untitled'}</p>
+                  <p className="recommendation-author">{item.author || 'Unknown author'}</p>
+                  {item.reason && <p className="recommendation-reason">{item.reason}</p>}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        {aiRawOutput && (
+          <details className="ai-raw-output">
+            <summary>Show raw AI output</summary>
+            <pre>{aiRawOutput}</pre>
+          </details>
+        )}
       </div>
 
       <div className="panel">
@@ -217,7 +287,7 @@ export default function App() {
         </div>
 
         <div ref={listRef}>
-          {isLoading && <p>Loading…</p>}
+          {isLoading && <p>Loading...</p>}
 
           {!isLoading && loadError && <p className="text-error">{loadError}</p>}
 

@@ -14,7 +14,9 @@ mongoose.connect(process.env.MONGO_URI)
 app.get('/health', (_req, res) => res.json({ ok: true }))
 
 const booksRouter = require('./routes/books')
+const recommendationsRouter = require('./routes/recommendations')
 app.use('/api/books', booksRouter)
+app.use('/api/recommendations', recommendationsRouter)
 
 app.use((err, _req, res, _next) => {
   console.error(err)
