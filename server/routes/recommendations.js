@@ -3,8 +3,8 @@ const Book=require('../models/Book')
 const fetch=global.fetch||require('node-fetch')
 
 const GEMINI_URL='https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'
-const DEFAULT_AI_KEY='AIzaSyCIj4R3FyDpuJdNbJcqQMknKjc0_MA_5gA'
-const AI_API_KEY=process.env.AI_API_KEY||DEFAULT_AI_KEY
+
+const AI_API_KEY=process.env.AI_API_KEY
 const MAX_RESULTS=5
 
 const buildPrompt=(books)=>{
@@ -22,7 +22,6 @@ Respond ONLY with a JSON array like [{"title":"","author":"","reason":""}].`
 
   return `You are a helpful reading guide. Based on the user's reading history:
 ${history}
-
 Recommend 3 to 5 new books the user has NOT read yet. Never reuse titles from the history above. Each recommendation must include a real book title and the author's full name.
 Return ONLY a pure JSON array (no markdown) of objects structured as:
 [{"title":"","author":"","reason":""}]. Keep reasons under 35 words and do not mention "more like" or similar phrasing.`
