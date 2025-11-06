@@ -32,7 +32,7 @@ Book Tracker is a reading log that lets you manage your personal library while i
 
 ### Clone and Install
 ```bash
-git clone <repo-url>
+git clone https://github.com/SAW-Certifi/Certifi-Test-App
 cd Certifi-Test-App
 ```
 
