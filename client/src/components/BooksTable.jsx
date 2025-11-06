@@ -1,4 +1,29 @@
-export default function BooksTable({ books, onEditBook, onDeleteBook }) {
+export default function BooksTable({ books, onEditBook, onDeleteBook, sortConfig, onSort }) {
+  const handleSortRequest = (field) => {
+    if (typeof onSort === 'function') onSort(field)
+  }
+
+  const renderSortButton = (label, field) => {
+    const isActive = sortConfig?.field === field
+    const nextDirection = isActive && sortConfig.direction === 'asc' ? 'descending' : 'ascending'
+
+    return (
+      <button
+        type="button"
+        className={`sort-button${isActive ? ' is-active' : ''}`}
+        onClick={() => handleSortRequest(field)}
+        aria-label={`Sort by ${label.toLowerCase()} ${nextDirection}`}
+      >
+        <span>{label}</span>
+        {isActive && (
+          <span className="sort-indicator" aria-hidden="true">
+            {sortConfig.direction === 'asc' ? 'ASC' : 'DESC'}
+          </span>
+        )}
+      </button>
+    )
+  }
+
   if (!books.length) return <p className="muted-text">No books found.</p>
   return (
     <table className="data-table">
@@ -6,8 +31,8 @@ export default function BooksTable({ books, onEditBook, onDeleteBook }) {
         <tr>
           <th>Title</th>
           <th>Author</th>
-          <th>Year</th>
-          <th>Rating</th>
+          <th>{renderSortButton('Year', 'year')}</th>
+          <th>{renderSortButton('Rating', 'rating')}</th>
           <th>Actions</th>
         </tr>
       </thead>

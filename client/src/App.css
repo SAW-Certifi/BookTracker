@@ -333,9 +333,9 @@
 .panel-list-content .table-shell {
   flex-grow: 1;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
+  align-items: flex-start;
+  justify-content: flex-start;
+  width: 100%;  
 }
 
 .panel-list-content .table-shell .data-table {
@@ -404,6 +404,39 @@
   text-transform: uppercase;
   letter-spacing: 0.16em;
   color: #818896;
+}
+
+.sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.sort-button:hover,
+.sort-button.is-active {
+  color: #1f2937;
+}
+
+.sort-button:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.5);
+  outline-offset: 2px;
+  border-radius: 999px;
+}
+
+.sort-button .sort-indicator {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
 }
 
 .data-table td {
@@ -750,6 +783,15 @@ body.dark-mode .data-table td {
 
 body.dark-mode .data-table th {
   color: #8e9297;
+}
+
+body.dark-mode .sort-button:hover,
+body.dark-mode .sort-button.is-active {
+  color: #f8f9fb;
+}
+
+body.dark-mode .sort-button:focus-visible {
+  outline-color: rgba(250, 250, 255, 0.5);
 }
 
 body.dark-mode .link-button {

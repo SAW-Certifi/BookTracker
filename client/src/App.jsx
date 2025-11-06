@@ -30,10 +30,21 @@ export default function App() {
   const [isRecommendationsLoading, setIsRecommendationsLoading] = useState(false)
   const [recommendationsError, setRecommendationsError] = useState('')
   const [aiRawOutput, setAiRawOutput] = useState('')
+  const [sortConfig, setSortConfig] = useState({ field: null, direction: 'asc' })
 
   const listRef = useRef(null)
   const minHeightRef = useRef(null)
   const pagesCacheRef = useRef({})
+
+  const handleSortToggle = useCallback((field) => {
+    setSortConfig((previous) => {
+      const isSameField = previous.field === field
+      const nextDirection = isSameField && previous.direction === 'asc' ? 'desc' : 'asc'
+      return { field, direction: nextDirection }
+    })
+    pagesCacheRef.current = {}
+    setCurrentPage(1)
+  }, [])
 
   const fetchRecommendations = async () => {
     setRecommendationsError('')
@@ -78,6 +89,10 @@ export default function App() {
         const params = { page: pageToLoad, limit: pageSize }
         if (searchTerm.trim()) params.search = searchTerm.trim()
         if (ratingFilter !== 'all') params.minRating = ratingFilter
+        if (sortConfig.field) {
+          params.sortField = sortConfig.field
+          params.sortOrder = sortConfig.direction
+        }
         const { data } = await api.get('/api/books', { params })
         const books = Array.isArray(data.data) ? data.data : []
         const normalized = books.map(normalizeBook)
@@ -101,7 +116,7 @@ export default function App() {
         if (showLoading) setIsLoading(false)
       }
     },
-    [pageSize, ratingFilter, searchTerm]
+    [pageSize, ratingFilter, searchTerm, sortConfig.field, sortConfig.direction]
   )
 
   // load a page with cache if possible
@@ -196,6 +211,7 @@ export default function App() {
     setSearchInput('')
     setSearchTerm('')
     setRatingFilter('all')
+    setSortConfig({ field: null, direction: 'asc' })
     setCurrentPage(1)
   }
 
@@ -318,7 +334,13 @@ export default function App() {
             {!isLoading && !loadError && (
             <>
               <div className="table-shell">
-                <BooksTable books={bookList} onEditBook={handleEditBook} onDeleteBook={requestDeleteBook} />
+                <BooksTable
+                  books={bookList}
+                  sortConfig={sortConfig}
+                  onSort={handleSortToggle}
+                  onEditBook={handleEditBook}
+                  onDeleteBook={requestDeleteBook}
+                />
               </div>
               <div className="pagination-controls">
                 {currentPage > 1 && (

@@ -9,7 +9,9 @@ router.get('/', async (req, res, next) => {
       minRating,
       maxRating,
       page = 1,
-      limit = 10
+      limit = 10,
+      sortField,
+      sortOrder
     } = req.query
 
     const parsedLimit = Math.min(50, Math.max(1, parseInt(limit, 10) || 10))
@@ -27,13 +29,17 @@ router.get('/', async (req, res, next) => {
       if ((maxRating ?? '') !== '') filters.rating.$lte = Number(maxRating)
     }
 
+    const sortableFields = new Set(['year', 'rating', 'createdAt'])
+    const resolvedSortField = sortableFields.has(sortField) ? sortField : 'createdAt'
+    const resolvedSortOrder = sortOrder === 'asc' ? 1 : -1
+
     const total = await Book.countDocuments(filters)
     const totalPages = total === 0 ? 1 : Math.ceil(total / parsedLimit)
     const safePage = Math.min(parsedPage, totalPages)
     const skip = (safePage - 1) * parsedLimit
 
     const books = await Book.find(filters)
-      .sort({ createdAt: -1 })
+      .sort({ [resolvedSortField]: resolvedSortOrder })
       .skip(skip)
       .limit(parsedLimit)
 
