@@ -1,5 +1,9 @@
 const router = require('express').Router()
+const { isValidObjectId } = require('mongoose')
 const Book = require('../models/Book')
+
+// prevent regex injection
+const escapeRegex = (value = '') => value.replace(/[|\\{}()[\]^$+*?.-]/g, '\\$&')
 
 // get all with basic search, filter, and pagination
 router.get('/', async (req, res, next) => {
@@ -16,10 +20,10 @@ router.get('/', async (req, res, next) => {
 
     const parsedLimit = Math.min(50, Math.max(1, parseInt(limit, 10) || 10))
     const parsedPage = Math.max(1, parseInt(page, 10) || 1)
-    const filters = {}
+    const filters = { userId: req.user.uid }
 
     if (search.trim()) {
-      const expression = new RegExp(search.trim(), 'i')
+      const expression = new RegExp(escapeRegex(search.trim()), 'i')
       filters.$or = [{ title: expression }, { author: expression }]
     }
 
@@ -58,7 +62,8 @@ router.get('/', async (req, res, next) => {
 // get from book id
 router.get('/:id', async (req, res, next) => {
   try {
-    const book = await Book.findById(req.params.id)
+    if (!isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid id' })
+    const book = await Book.findOne({ _id: req.params.id, userId: req.user.uid })
     if (!book) return res.status(404).json({ error: 'Not found' })
     res.json(book)
   } catch (err) { next(err) }
@@ -70,7 +75,7 @@ router.post('/', async (req, res, next) => {
     const { title, author, year, rating } = req.body
     if (!title || !author)
       return res.status(400).json({ error: 'title and author required' })
-    const created = await Book.create({ title, author, year, rating })
+    const created = await Book.create({ userId: req.user.uid, title, author, year, rating })
     res.status(201).json(created)
   } catch (err) { next(err) }
 })
@@ -78,9 +83,17 @@ router.post('/', async (req, res, next) => {
 // update
 router.put('/:id', async (req, res, next) => {
   try {
-    const updated = await Book.findByIdAndUpdate(
-      req.params.id,
-      req.body,
+    if (!isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid id' })
+    const { title, author, year, rating } = req.body
+    const payload = {}
+    if (title !== undefined) payload.title = title
+    if (author !== undefined) payload.author = author
+    if (year !== undefined) payload.year = year
+    if (rating !== undefined) payload.rating = rating
+
+    const updated = await Book.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.uid },
+      payload,
       { new: true, runValidators: true }
     )
     if (!updated) return res.status(404).json({ error: 'Not found' })
@@ -91,7 +104,8 @@ router.put('/:id', async (req, res, next) => {
 // delete
 router.delete('/:id', async (req, res, next) => {
   try {
-    const deleted = await Book.findByIdAndDelete(req.params.id)
+    if (!isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid id' })
+    const deleted = await Book.findOneAndDelete({ _id: req.params.id, userId: req.user.uid })
     if (!deleted) return res.status(404).json({ error: 'Not found' })
     res.json({ ok: true })
   } catch (err) { next(err) }

@@ -106,10 +106,10 @@ const pullTextFromResponse=(payload)=>(
     .trim()
 )
 
-router.get('/',async(_req,res)=>{
+router.get('/',async(req,res)=>{
   let aiText=''
   try{
-    const books=await Book.find().sort({updatedAt:-1})
+    const books=await Book.find({userId:req.user.uid}).sort({updatedAt:-1})
     if(!AI_API_KEY){
       return res.status(500).json({error:'AI_API_KEY missing. Set it in server/.env and restart the server.'})
     }

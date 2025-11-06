@@ -5,6 +5,7 @@ client/.env
 client/.env.*
 server/.env
 server/.env.*
+server/firebaseServiceAccount.json
 !.env.example
 !client/.env.example
 !server/.env.example

@@ -39,13 +39,22 @@
   max-width: 620px;
 }
 
-.hero-kicker {
-  margin: 0 0 12px;
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.18em;
+.hwelcome {
+  margin: 0 0 10px;
+  font-size: 1.05rem;
+  font-weight: 600;
   color: #d97706;
+}
+
+.actioons {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.signout-button {
+  padding-inline: 1.4rem;
 }
 
 .app-title {
@@ -54,13 +63,6 @@
   font-weight: 700;
   letter-spacing: -0.035em;
   color: #0f172a;
-}
-
-.hero-copy {
-  margin: 18px 0 0;
-  font-size: 1.06rem;
-  line-height: 1.7;
-  color: #4b5563;
 }
 
 /* smooth toggle */
@@ -157,6 +159,89 @@
   color: #b3261e;
   margin: 12px 0 0;
   font-weight: 600;
+}
+
+/* auth stuff */
+.auth-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 20px;
+  padding: 56px 16px;
+}
+
+.auth-panel {
+  max-width: 440px;
+  width: 100%;
+  padding: 40px 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auth-title {
+  margin: 0 0 12px;
+  font-size: 2.2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.auth-submit {
+  align-self: flex-start;
+}
+
+.auth-mode-toggle {
+  margin-top: 18px;
+  background: none;
+  border: none;
+  color: #2563eb;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.2s ease;
+}
+
+.auth-mode-toggle:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+.verification-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.verification-message {
+  margin: 16px 0 0;
+  color: #4b5563;
+  font-size: 0.9rem;
+}
+
+.auth-inline-error {
+  margin: 0 0 16px;
+  font-weight: 600;
+}
+
+.hdelete {
+  padding-inline: 1.6rem;
+}
+
+.auth-theme-toggle {
+  margin-top: 18px;
+  align-self: center;
+  padding: 0.5rem 1.4rem;
 }
 
 /* form */
@@ -428,7 +513,7 @@
 }
 
 .sort-button:focus-visible {
-  outline: 2px solid rgba(37, 99, 235, 0.5);
+  outline: 2px solid rgba(37, 99, 235, 0.45);
   outline-offset: 2px;
   border-radius: 999px;
 }
@@ -522,12 +607,6 @@
 .pagination-info {
   font-weight: 600;
   color: #4b5563;
-}
-
-.panel-description {
-  margin: 4px 0 0;
-  color: #596178;
-  font-size: 0.95rem;
 }
 
 .recommendations-actions {
@@ -675,6 +754,10 @@ body.dark-mode .apph::after {
   background: radial-gradient(circle at top left, rgba(255, 115, 0, 0.15), transparent 75%);
 }
 
+body.dark-mode .hwelcome {
+  color: #facc15;
+}
+
 body.dark-mode .app-title {
   color: #f8f9fb;
 }
@@ -705,6 +788,26 @@ body.dark-mode .panel-title {
 
 body.dark-mode .panel-subtitle {
   color: #b5bac4;
+}
+
+body.dark-mode .auth-shell {
+  background: #1e1f24;
+}
+
+body.dark-mode .auth-title {
+  color: #f8f9fb;
+}
+
+body.dark-mode .auth-mode-toggle {
+  color: #8ab4ff;
+}
+
+body.dark-mode .auth-mode-toggle:hover {
+  color: #b3c8ff;
+}
+
+body.dark-mode .verification-message {
+  color: #c7c9d1;
 }
 
 body.dark-mode .add-book-toggle {
@@ -791,7 +894,7 @@ body.dark-mode .sort-button.is-active {
 }
 
 body.dark-mode .sort-button:focus-visible {
-  outline-color: rgba(250, 250, 255, 0.5);
+  outline-color: rgba(250, 250, 255, 0.45);
 }
 
 body.dark-mode .link-button {

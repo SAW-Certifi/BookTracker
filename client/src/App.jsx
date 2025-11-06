@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api } from './lib/api'
+import {
+  createUserWithEmailAndPassword,
+  deleteUser,
+  onIdTokenChanged,
+  reload,
+  sendEmailVerification,
+  signInWithEmailAndPassword,
+  signOut,
+  updateProfile
+} from 'firebase/auth'
+import { api, setAuthToken } from './lib/api'
 import './App.css'
+import { auth } from './lib/firebase'
 import BookForm from './components/BookForm'
 import BooksTable from './components/BooksTable'
 
@@ -30,23 +41,63 @@ export default function App() {
   const [isRecommendationsLoading, setIsRecommendationsLoading] = useState(false)
   const [recommendationsError, setRecommendationsError] = useState('')
   const [aiRawOutput, setAiRawOutput] = useState('')
+  const [authUser, setAuthUser] = useState(null)
   const [sortConfig, setSortConfig] = useState({ field: null, direction: 'asc' })
+  const [isAuthReady, setIsAuthReady] = useState(false)
+  const [authMode, setAuthMode] = useState('login')
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [authDisplayName, setAuthDisplayName] = useState('')
+  const [authError, setAuthError] = useState('')
+  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false)
+  const [verificationMessage, setVerificationMessage] = useState('')
+  const [isSendingVerification, setIsSendingVerification] = useState(false)
+  const [isRefreshingVerification, setIsRefreshingVerification] = useState(false)
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false)
+  const [isAccountDeleteModalOpen, setIsAccountDeleteModalOpen] = useState(false)
 
   const listRef = useRef(null)
   const minHeightRef = useRef(null)
   const pagesCacheRef = useRef({})
-
-  const handleSortToggle = useCallback((field) => {
-    setSortConfig((previous) => {
-      const isSameField = previous.field === field
-      const nextDirection = isSameField && previous.direction === 'asc' ? 'desc' : 'asc'
-      return { field, direction: nextDirection }
+  useEffect(() => {
+    const unsubscribe = onIdTokenChanged(auth, async (user) => {
+      setAuthUser(user ? { ...user } : null)
+      if (user) {
+        try {
+          const token = await user.getIdToken()
+          setAuthToken(token)
+          setVerificationMessage('')
+          setAuthError('')
+        } catch (error) {
+          console.error('Failed to refresh auth token:', error)
+        }
+      } else {
+        setAuthToken(null)
+        pagesCacheRef.current = {}
+        setBookList([])
+        setPaginationInfo({ page: 1, totalPages: 1, total: 0 })
+        setSelectedBook(null)
+        setIsFormOpen(false)
+        setBookPendingDeletion(null)
+        setRecommendations([])
+        setRecommendationsSource('')
+        setRecommendationsError('')
+        setAiRawOutput('')
+        setIsLoading(false)
+      }
+      setIsSendingVerification(false)
+      setIsRefreshingVerification(false)
+      setIsDeletingAccount(false)
+      setIsAuthReady(true)
     })
-    pagesCacheRef.current = {}
-    setCurrentPage(1)
+    return unsubscribe
   }, [])
 
   const fetchRecommendations = async () => {
+    if (!authUser || !authUser.emailVerified) {
+      setRecommendationsError(authUser ? 'Verify your email to request recommendations.' : 'Sign in to request recommendations.')
+      return
+    }
     setRecommendationsError('')
     setAiRawOutput('')
     setIsRecommendationsLoading(true)
@@ -64,10 +115,32 @@ export default function App() {
       setAiRawOutput(error?.response?.data?.rawOutput || '')
     } finally {
       setIsRecommendationsLoading(false)
-
     }
   }
 
+  useEffect(() => {
+    pagesCacheRef.current = {}
+    setSearchInput('')
+    setSearchTerm('')
+    setRatingFilter('all')
+    setSelectedBook(null)
+    setIsFormOpen(false)
+    setBookPendingDeletion(null)
+    setRecommendations([])
+    setRecommendationsSource('')
+    setRecommendationsError('')
+    setAiRawOutput('')
+    if (authUser?.emailVerified) {
+      setSortConfig({ field: null, direction: 'asc' })
+      setIsLoading(true)
+      setCurrentPage(1)
+    } else {
+      setBookList([])
+      setPaginationInfo({ page: 1, totalPages: 1, total: 0 })
+      setIsLoading(false)
+      setSortConfig({ field: null, direction: 'asc' })
+    }
+  }, [authUser])
 
   // theme preference memory
   useEffect(() => {
@@ -83,6 +156,7 @@ export default function App() {
   // fetch and cache a page of books
   const fetchAndCache = useCallback(
     async (pageToLoad = 1, { showLoading = true } = {}) => {
+      if (!authUser || !authUser.emailVerified) return null
       if (pagesCacheRef.current[pageToLoad]) return pagesCacheRef.current[pageToLoad]
       if (showLoading) setIsLoading(true)
       try {
@@ -109,19 +183,20 @@ export default function App() {
           fetchAndCache(pagination.page + 1, { showLoading: false }).catch(() => {})
         }
         return pagesCacheRef.current[pageToLoad]
-      } catch { // 
+      } catch {
         if (showLoading) setLoadError('Failed to load books')
         return null
       } finally {
         if (showLoading) setIsLoading(false)
       }
     },
-    [pageSize, ratingFilter, searchTerm, sortConfig.field, sortConfig.direction]
+    [authUser, pageSize, ratingFilter, searchTerm, sortConfig.field, sortConfig.direction]
   )
 
   // load a page with cache if possible
   const loadPage = useCallback(
     async (pageToLoad = 1) => {
+      if (!authUser || !authUser.emailVerified) return
       const cached = pagesCacheRef.current[pageToLoad]
       if (cached) {
         setBookList(cached.books)
@@ -135,12 +210,13 @@ export default function App() {
       }
       await fetchAndCache(pageToLoad, { showLoading: true })
     },
-    [fetchAndCache]
+    [authUser, fetchAndCache]
   )
 
   useEffect(() => {
+    if (!authUser || !authUser.emailVerified) return
     loadPage(currentPage)
-  }, [currentPage, loadPage])
+  }, [authUser, currentPage, loadPage])
 
   useEffect(() => {
     if (isLoading) return
@@ -152,6 +228,7 @@ export default function App() {
   }, [isLoading])
 
   const createBook = async (bookPayload) => {
+    if (!authUser) return
     try {
       await api.post('/api/books', bookPayload)
       pagesCacheRef.current = {}
@@ -164,7 +241,7 @@ export default function App() {
   }
 
   const updateBook = async (bookPayload) => {
-    if (!selectedBook) return
+    if (!authUser || !selectedBook) return
     try {
       await api.put(`/api/books/${selectedBook.id}`, bookPayload)
       pagesCacheRef.current = {}
@@ -180,7 +257,7 @@ export default function App() {
   const cancelDeleteRequest = () => setBookPendingDeletion(null)
 
   const confirmDeleteBook = async () => {
-    if (!bookPendingDeletion) return
+    if (!authUser || !bookPendingDeletion) return
     const bookToRemove = bookPendingDeletion
     try {
       await api.delete(`/api/books/${bookToRemove.id}`)
@@ -190,6 +267,115 @@ export default function App() {
       alert('Delete failed')
     } finally {
       setBookPendingDeletion(null)
+    }
+  }
+
+  const handleAuthSubmit = async (event) => {
+    event.preventDefault()
+    setAuthError('')
+    setVerificationMessage('')
+    setIsAuthSubmitting(true)
+    try {
+      const trimmedEmail = authEmail.trim()
+      if (!trimmedEmail) throw new Error('Email is required')
+      if (authMode === 'register') {
+        const { user } = await createUserWithEmailAndPassword(auth, trimmedEmail, authPassword)
+        const displayNameValue = authDisplayName.trim()
+        if (displayNameValue) {
+          await updateProfile(user, { displayName: displayNameValue })
+        }
+        await sendEmailVerification(user)
+        setVerificationMessage(`Verification link has been sent to ${user.email}. Check your spam.`)
+      } else {
+        await signInWithEmailAndPassword(auth, trimmedEmail, authPassword)
+      }
+    } catch (error) {
+      setAuthError(error.message || 'Authentication failed')
+    } finally {
+      setIsAuthSubmitting(false)
+    }
+  }
+
+  const handleSendVerification = async () => {
+    if (!auth.currentUser) return
+    setIsSendingVerification(true)
+    setAuthError('')
+    try {
+      await sendEmailVerification(auth.currentUser)
+      setVerificationMessage(`Verification email has been sent to ${auth.currentUser.email}. Check your spam.`)
+    } catch (error) {
+      setAuthError(error.message || 'Failed to send verification email')
+    } finally {
+      setIsSendingVerification(false)
+    }
+  }
+
+  const handleRefreshVerification = async () => {
+    if (!auth.currentUser) return
+    setIsRefreshingVerification(true)
+    setAuthError('')
+    try {
+      await reload(auth.currentUser)
+      const updatedUser = auth.currentUser
+      if (!updatedUser) throw new Error('User session expired.')
+      setAuthUser({ ...updatedUser })
+      if (updatedUser.emailVerified) {
+        const freshToken = await updatedUser.getIdToken(true)
+        setAuthToken(freshToken)
+        setVerificationMessage('Email verified!')
+      } else {
+        setVerificationMessage('Still waiting on verification. Double-check your spam.')
+      }
+    } catch (error) {
+      setAuthError(error.message || 'Failed to refresh your verification status')
+    } finally {
+      setIsRefreshingVerification(false)
+    }
+  }
+
+  const openAccountDeleteModal = () => {
+    setAuthError('')
+    setVerificationMessage('')
+    setIsAccountDeleteModalOpen(true)
+  }
+
+  const closeAccountDeleteModal = () => {
+    if (!isDeletingAccount) setIsAccountDeleteModalOpen(false)
+  }
+
+  const handleDeleteAccount = async () => {
+    if (!authUser) return
+    setAuthError('')
+    setIsDeletingAccount(true)
+    try {
+      await api.delete('/api/account')
+      await deleteUser(auth.currentUser)
+      setIsAccountDeleteModalOpen(false)
+    } catch (error) {
+      if (error?.code === 'auth/requires-recent-login') {
+        setAuthError('Please sign in again before deleting your account.')
+      } else {
+        setAuthError(error?.message || 'Failed to delete account')
+      }
+    } finally {
+      setIsDeletingAccount(false)
+    }
+  }
+
+  const toggleAuthMode = () => {
+    setAuthMode((previous) => (previous === 'login' ? 'register' : 'login'))
+    setAuthError('')
+    setAuthPassword('')
+    setAuthDisplayName('')
+  }
+
+  const handleSignOut = async () => {
+    try {
+      setAuthError('')
+      setVerificationMessage('')
+      await signOut(auth)
+    } catch (error) {
+      console.error('Sign out failed:', error)
     }
   }
 
@@ -247,25 +433,153 @@ export default function App() {
   }, [selectedBook])
 
   const formToggleLabel = selectedBook ? 'Close editor' : isFormOpen ? 'Hide form' : 'Add a book'
+  const userDisplayName = authUser?.displayName?.trim() || authUser?.email || 'Reader'
 
-  // render main layout
-  return (
-    <div className="app-shell">
-      <header className="apph">
-        <div className="hmeta">
-          <h1 className="app-title">BookTracker</h1>
+  const handleSortToggle = useCallback((field) => {
+    setSortConfig((previous) => {
+      const isSameField = previous.field === field
+      const nextDirection = isSameField && previous.direction === 'asc' ? 'desc' : 'asc'
+      return { field, direction: nextDirection }
+    })
+    pagesCacheRef.current = {}
+    setCurrentPage(1)
+  }, [])
+
+  if (!isAuthReady) {
+    return (
+      <div className="auth-shell">
+        <p className="muted-text">Checking session...</p>
+      </div>
+    )
+  }
+
+  if (!authUser) {
+    return (
+      <div className="auth-shell">
+        <div className="panel auth-panel">
+          <h1 className="auth-title">BookTracker</h1>
+          <p className="panel-description">Sign in to manage your library.</p>
+          {authError && <p className="text-error">{authError}</p>}
+          <form className="auth-form" onSubmit={handleAuthSubmit}>
+            {authMode === 'register' && (
+              <div className="form-row">
+                <label className="form-label" htmlFor="auth-display-name">Display name</label>
+                <input
+                  id="auth-display-name"
+                  className="form-input"
+                  value={authDisplayName}
+                  onChange={(event) => setAuthDisplayName(event.target.value)}
+                  placeholder="What should we call you?"
+                />
+              </div>
+            )}
+            <div className="form-row">
+              <label className="form-label" htmlFor="auth-email">Email</label>
+              <input
+                id="auth-email"
+                type="email"
+                required
+                className="form-input"
+                value={authEmail}
+                onChange={(event) => setAuthEmail(event.target.value)}
+                placeholder="john@doe.com"
+              />
+            </div>
+            <div className="form-row">
+              <label className="form-label" htmlFor="auth-password">Password</label>
+              <input
+                id="auth-password"
+                type="password"
+                required
+                minLength={6}
+                className="form-input"
+                value={authPassword}
+                onChange={(event) => setAuthPassword(event.target.value)}
+                placeholder="Minimum 6 characters"
+              />
+            </div>
+            <button className="btn btn-primary auth-submit" type="submit" disabled={isAuthSubmitting}>
+              {isAuthSubmitting ? (authMode === 'register' ? 'Creating account...' : 'Signing in...') : authMode === 'register' ? 'Create account' : 'Sign in'}
+            </button>
+          </form>
+          <button className="auth-mode-toggle" type="button" onClick={toggleAuthMode}>
+            {authMode === 'login' ? 'Need an account? Register instead' : 'Have an account? Sign in'}
+          </button>
         </div>
         <button
-          className="theme-toggle"
+          className="theme-toggle auth-theme-toggle"
           type="button"
           aria-label="Toggle color theme"
           onClick={() => setIsDarkMode((p) => !p)}
         >
           {isDarkMode ? 'Light mode' : 'Dark mode'}
         </button>
+      </div>
+    )
+  }
+
+  if (authUser && !authUser.emailVerified) {
+    return (
+      <div className="auth-shell">
+        <div className="panel auth-panel">
+          <h1 className="auth-title">Verify your email</h1>
+          <p className="panel-description">We sent a confirmation link to <strong>{authUser.email}</strong>. Please verify your email.</p>
+          {authError && <p className="text-error">{authError}</p>}
+          {verificationMessage && <p className="verification-message">{verificationMessage}</p>}
+          <div className="verification-actions">
+            <button
+              className="btn btn-primary"
+              type="button"
+              onClick={handleSendVerification}
+              disabled={isSendingVerification}
+            >
+              {isSendingVerification ? 'Sending...' : 'Resend email'}
+            </button>
+            <button
+              className="btn btn-secondary"
+              type="button"
+              onClick={handleRefreshVerification}
+              disabled={isRefreshingVerification}
+            >
+              {isRefreshingVerification ? 'Checking...' : 'I verified my email'}
+            </button>
+            <button className="btn btn-secondary" type="button" onClick={handleSignOut}>
+              Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // render main layout
+  return (
+    <div className="app-shell">
+      <header className="apph">
+        <div className="hmeta">
+          <p className="hwelcome">Welcome back, {userDisplayName}</p>
+          <h1 className="app-title">BookTracker</h1>
+        </div>
+        <div className="actioons">
+          <button
+            className="theme-toggle"
+            type="button"
+            aria-label="Toggle color theme"
+            onClick={() => setIsDarkMode((p) => !p)}
+          >
+            {isDarkMode ? 'Light mode' : 'Dark mode'}
+          </button>
+          <button className="btn btn-secondary signout-button" type="button" onClick={handleSignOut}>
+            Sign out
+          </button>
+          <button className="btn btn-danger hdelete" type="button" onClick={openAccountDeleteModal}>
+            Delete account
+          </button>
+        </div>
       </header>
 
       <main className="layout-main">
+        {authError && <p className="text-error auth-inline-error">{authError}</p>}
         <section className="panel panel-list">
           <div className="panel-header">
             <div>
@@ -384,7 +698,6 @@ export default function App() {
 
         <div className="panel">
           <h2 className="panel-title">AI recommendations</h2>
-          <p className="panel-description">We analyze your logged books and ratings, then ask our AI to queue up 3-5 fresh reads.</p>
 
           <div className="recommendations-actions">
             <button
@@ -406,7 +719,7 @@ export default function App() {
           {recommendationsError && <p className="text-error">{recommendationsError}</p>}
 
           {!recommendationsError && !isRecommendationsLoading && recommendations.length === 0 && (
-            <p className="muted-text">Click the button to get personalized picks.</p>
+            <p className="muted-text">Click the button to generate personalized book recommendations.</p>
           )}
 
           {recommendations.length > 0 && (
@@ -441,6 +754,34 @@ export default function App() {
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={cancelDeleteRequest}>Cancel</button>
               <button type="button" className="btn btn-danger" onClick={confirmDeleteBook}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isAccountDeleteModalOpen && (
+        <div className="modal-backdrop">
+          <div className="modal" role="dialog" aria-modal="true">
+            <h3 className="modal-title">Delete Account</h3>
+            <p className="modal-message">This will remove your account delete all saved books. Are you sure?</p>
+            {authError && <p className="text-error">{authError}</p>}
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={closeAccountDeleteModal}
+                disabled={isDeletingAccount}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={handleDeleteAccount}
+                disabled={isDeletingAccount}
+              >
+                {isDeletingAccount ? 'Deleting...' : 'Delete'}
+              </button>
             </div>
           </div>
         </div>
