@@ -829,6 +829,9 @@ body.dark-mode .modal {
   box-shadow: 0 32px 70px -45px rgba(0, 0, 0, 0.85);
 }
 
+body.dark-mode .modal-title {
+  color: #f8f9fb;
+}
 body.dark-mode .modal-message {
   color: #c7c9d1;
 }
