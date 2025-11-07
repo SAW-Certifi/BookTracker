@@ -14,7 +14,8 @@ Book Tracker is a reading log that lets you manage your personal library while i
 - Front end (Vercel): https://book-tracker-project.vercel.app/
 - Back end (Render): https://certifi-test-app.onrender.com/
 
-> Render free instances sleep after inactivity. If the UI shows API errors, open the backend URL above in a browser tab to wake the service and try again.
+> Important: Always start or wake the back end before using the front end.  
+> Render free instances sleep after inactivity. If the UI shows API errors or broken features, open the backend URL above in a browser tab to wake the service, then try the front end again.
 
 ## Tech
 - React 19 + Vite + Axios
