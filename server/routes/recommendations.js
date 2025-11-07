@@ -7,7 +7,7 @@ const GEMINI_URL='https://generativelanguage.googleapis.com/v1beta/models/gemini
 const AI_API_KEY=process.env.AI_API_KEY
 const MAX_RESULTS=5
 
-const buildPrompt=(books)=>{
+const buildPrompt=(books)=>{ // rewrite prompt, could be prompt engineered further (also vulnerable to prompt injection)
   if(!books.length){
     return `You are a helpful reading guide. The user has not logged any books yet.
 Suggest 3 to 5 engaging books (include author) and provide a short reason for each.

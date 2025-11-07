@@ -8,7 +8,8 @@ const bookSchema = new Schema({
   rating: { type: Number, min: 0, max: 5 },
   communityRating: { type: Number, min: 0, max: 5 },
   openLibraryWorkKey: { type: String, trim: true },
-  openLibraryEditionKey: { type: String, trim: true }
+  openLibraryEditionKey: { type: String, trim: true },
+  note: { type: String, trim: true, maxlength: 1200 }
 }, { timestamps: true })
 
 module.exports = model('Book', bookSchema)

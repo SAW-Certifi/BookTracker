@@ -13,7 +13,7 @@ const formatRatingValue = (value) => {
   return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted
 }
 
-export default function BooksTable({ books, onEditBook, onDeleteBook, sortConfig, onSort }) {
+export default function BooksTable({ books, onEditBook, onDeleteBook, onEditNote, sortConfig, onSort }) {
   const handleSortRequest = (field) => {
     if (typeof onSort === 'function') onSort(field)
   }
@@ -54,14 +54,22 @@ export default function BooksTable({ books, onEditBook, onDeleteBook, sortConfig
   if (!books.length) return <p className="muted-text">No books found.</p>
   return (
     <table className="data-table">
+      <colgroup>
+        <col className="table-col-title" />
+        <col className="table-col-author" />
+        <col className="table-col-year" />
+        <col className="table-col-rating" />
+        <col className="table-col-rating" />
+        <col className="table-col-actions" />
+      </colgroup>
       <thead>
         <tr>
-          <th>{renderSortButton('Title', 'title')}</th>
-          <th>{renderSortButton('Author(s)', 'author')}</th>
-          <th>{renderSortButton('Year', 'year')}</th>
-          <th>{renderSortButton('Personal Rating', 'rating')}</th>
-          <th>{renderSortButton('Community Rating', 'communityRating')}</th>
-          <th>Actions</th>
+          <th className="table-col-title">{renderSortButton('Title', 'title')}</th>
+          <th className="table-col-author">{renderSortButton('Author(s)', 'author')}</th>
+          <th className="table-col-year">{renderSortButton('Year', 'year')}</th>
+          <th className="table-col-rating">{renderSortButton('Personal Rating', 'rating')}</th>
+          <th className="table-col-rating">{renderSortButton('Community Rating', 'communityRating')}</th>
+          <th className="table-col-actions">Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -70,32 +78,74 @@ export default function BooksTable({ books, onEditBook, onDeleteBook, sortConfig
             formatRatingValue(book.personalRating ?? book.rating) || 'N/A'
           const communityDisplay =
             formatRatingValue(book.communityRating) || 'N/A'
+          const yearDisplay = book.year ? book.year : 'N/A'
           return (
             <tr key={book.id}>
-              <td>
+              <td className="table-col-title">
                 <span className="book-title-cell">
+                  <span className="book-source-wrapper">
+                    {book.openLibraryWorkKey ? (
+                      <a
+                        className="book-source-indicator"
+                        href={resolveOpenLibraryUrl(book.openLibraryWorkKey)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label="View this book on Open Library"
+                        title="View this book on Open Library"
+                      >
+                        ↗
+                      </a>
+                    ) : (
+                      <span className="book-source-indicator is-placeholder" aria-hidden="true">↗</span>
+                    )}
+                  </span>
+                  <span className="book-note-wrapper">
+                    {book.note ? (
+                      <span className="book-note-indicator" aria-label="Contains notes" title="Contains notes">📝</span>
+                    ) : (
+                      <span className="book-note-indicator is-placeholder" aria-hidden="true">📝</span>
+                    )}
+                  </span>
                   <span className="book-title-text">{book.title}</span>
-                  {book.openLibraryWorkKey && (
-                    <a
-                      className="book-source-indicator"
-                      href={resolveOpenLibraryUrl(book.openLibraryWorkKey)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      aria-label="View this book on Open Library"
-                      title="View this book on Open Library"
-                    >
-                      ↗
-                    </a>
-                  )}
                 </span>
               </td>
-              <td>{book.author}</td>
-              <td>{book.year ?? ''}</td>
-              <td>{personalDisplay}</td>
-              <td>{communityDisplay}</td>
-              <td className="table-actions">
-                <button className="link-button" onClick={() => onEditBook(book)}>Edit</button>
-                <button className="link-button danger" onClick={() => onDeleteBook(book)}>Delete</button>
+              <td className="table-col-author">
+                <span className="table-cell-text">{book.author}</span>
+              </td>
+              <td className="table-col-year">
+                <span className="table-cell-text">{yearDisplay}</span>
+              </td>
+              <td className="table-col-rating">
+                <span className="table-cell-text">{personalDisplay}</span>
+              </td>
+              <td className="table-col-rating">
+                <span className="table-cell-text">{communityDisplay}</span>
+              </td>
+              <td className="table-actions table-col-actions">
+                <button
+                  className="icon-button"
+                  type="button"
+                  aria-label={`Edit ${book.title}`}
+                  onClick={() => onEditBook(book)}
+                >
+                  ✏️
+                </button>
+                <button
+                  className={`icon-button note-button${book.note ? ' has-note' : ''}`}
+                  type="button"
+                  aria-label={book.note ? `View or edit notes for ${book.title}` : `Add notes for ${book.title}`}
+                  onClick={() => onEditNote?.(book)}
+                >
+                  📓
+                </button>
+                <button
+                  className="icon-button danger"
+                  type="button"
+                  aria-label={`Delete ${book.title}`}
+                  onClick={() => onDeleteBook(book)}
+                >
+                  ✕
+                </button>
               </td>
             </tr>
           )
