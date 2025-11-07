@@ -2,9 +2,11 @@
 
 Book Tracker is a reading log that lets you manage your personal library while integrating AI, allowing you to generate new book recommendations. The React/Vite client communicates with an Express/MongoDB API that requires Firebase-authenticated requests.
 
-- Track books with ratings, **we should add book progress or notes**.
+## Features
+- Add books with ratings, Open Library links, and notes.
 - Filter, search, paginate, and sort entries.
 - Toggle light/dark themes.
+- Manage display name, password reset, or account deletion.
 - Request new book recommendations generated through Google Gemini.
 - Secure all API access behind Firebase Authentication with email verification.
 
