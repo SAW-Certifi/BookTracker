@@ -5,6 +5,7 @@ import {
   onIdTokenChanged,
   reload,
   sendEmailVerification,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
   updateProfile
@@ -15,7 +16,15 @@ import { auth } from './lib/firebase'
 import BookForm from './components/BookForm'
 import BooksTable from './components/BooksTable'
 
+// constants
 const DEFAULT_PAGE_SIZE = 5
+const NOTE_MAX_LENGTH = 1200
+const NOTE_ALLOWED_REGEX = /^[\n\r\t -~]*$/
+const MIN_DISPLAY_NAME_LENGTH = 2
+const MAX_DISPLAY_NAME_LENGTH = 40
+const MIN_PASSWORD_LENGTH = 6
+const MAX_PASSWORD_LENGTH = 64
+const MAX_EMAIL_LENGTH = 254
 
 const toOptionalNumber = (value) => {
   if (value === undefined || value === null || value === '') return null
@@ -24,14 +33,15 @@ const toOptionalNumber = (value) => {
 }
 
 const normalizeBook = (book) => {
-  const { _id: id, rating, communityRating, ...rest } = book
+  const { _id: id, rating, communityRating, note = '', ...rest } = book
   const personalRatingValue = toOptionalNumber(rating)
   const communityRatingValue = toOptionalNumber(communityRating)
   return {
     id,
     ...rest,
     personalRating: personalRatingValue,
-    communityRating: communityRatingValue
+    communityRating: communityRatingValue,
+    note: typeof note === 'string' ? note : ''
   }
 }
 
@@ -68,6 +78,18 @@ export default function App() {
   const [isDeletingAccount, setIsDeletingAccount] = useState(false)
   const [isAccountDeleteModalOpen, setIsAccountDeleteModalOpen] = useState(false)
   const [knownWorkKeys, setKnownWorkKeys] = useState([])
+  const [activeView, setActiveView] = useState('library')
+  const [passwordResetMessage, setPasswordResetMessage] = useState('')
+  const [passwordResetError, setPasswordResetError] = useState('')
+  const [isSendingPasswordReset, setIsSendingPasswordReset] = useState(false)
+  const [displayNameInput, setDisplayNameInput] = useState('')
+  const [isUpdatingDisplayName, setIsUpdatingDisplayName] = useState(false)
+  const [displayNameUpdateMessage, setDisplayNameUpdateMessage] = useState('')
+  const [displayNameUpdateError, setDisplayNameUpdateError] = useState('')
+  const [noteEditorBook, setNoteEditorBook] = useState(null)
+  const [noteEditorValue, setNoteEditorValue] = useState('')
+  const [noteEditorError, setNoteEditorError] = useState('')
+  const [isSavingNote, setIsSavingNote] = useState(false)
 
   const listRef = useRef(null)
   const minHeightRef = useRef(null)
@@ -97,6 +119,10 @@ export default function App() {
         setRecommendationsError('')
         setIsLoading(false)
         setKnownWorkKeys([])
+        setNoteEditorBook(null)
+        setNoteEditorValue('')
+        setNoteEditorError('')
+        setIsSavingNote(false)
       }
       setIsSendingVerification(false)
       setIsRefreshingVerification(false)
@@ -150,6 +176,12 @@ export default function App() {
       setIsLoading(false)
       setSortConfig({ field: null, direction: 'asc' })
     }
+    setActiveView('library')
+    setPasswordResetError('')
+    setPasswordResetMessage('')
+    setDisplayNameInput(authUser?.displayName || '')
+    setDisplayNameUpdateError('')
+    setDisplayNameUpdateMessage('')
   }, [authUser])
 
   // theme preference memory
@@ -303,9 +335,24 @@ export default function App() {
     try {
       const trimmedEmail = authEmail.trim()
       if (!trimmedEmail) throw new Error('Email is required')
+      const passwordValue = authPassword
+      if (passwordValue.length < MIN_PASSWORD_LENGTH) {
+        throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`) // firebase default?
+      }
+      if (passwordValue.length > MAX_PASSWORD_LENGTH) {
+        throw new Error(`Password must be ${MAX_PASSWORD_LENGTH} characters or fewer.`)
+      }
       if (authMode === 'register') {
-        const { user } = await createUserWithEmailAndPassword(auth, trimmedEmail, authPassword)
         const displayNameValue = authDisplayName.trim()
+        if (displayNameValue) {
+          if (displayNameValue.length < MIN_DISPLAY_NAME_LENGTH) {
+            throw new Error(`Display name must be at least ${MIN_DISPLAY_NAME_LENGTH} characters.`)
+          }
+          if (displayNameValue.length > MAX_DISPLAY_NAME_LENGTH) {
+            throw new Error(`Display name must be ${MAX_DISPLAY_NAME_LENGTH} characters or fewer.`)
+          }
+        }
+        const { user } = await createUserWithEmailAndPassword(auth, trimmedEmail, authPassword)
         if (displayNameValue) {
           await updateProfile(user, { displayName: displayNameValue })
         }
@@ -387,11 +434,119 @@ export default function App() {
     }
   }
 
+  const handlePasswordResetRequest = async () => {
+    const emailValue = authEmail.trim()
+    if (!emailValue) {
+      setPasswordResetError('Enter your email address above first.')
+      setPasswordResetMessage('')
+      return
+    }
+    setPasswordResetError('')
+    setPasswordResetMessage('')
+    setIsSendingPasswordReset(true)
+    try {
+      await sendPasswordResetEmail(auth, emailValue)
+      setPasswordResetMessage('Password reset email sent. Check your inbox.')
+    } catch (error) {
+      setPasswordResetError(error?.message || 'Failed to send reset email.')
+    } finally {
+      setIsSendingPasswordReset(false)
+    }
+  }
+
+  const handleDisplayNameUpdate = async (event) => {
+    event.preventDefault()
+    if (!auth.currentUser) return
+    const nextName = displayNameInput.trim()
+    if (!nextName) {
+      setDisplayNameUpdateError('Display name can\'t be empty.')
+      setDisplayNameUpdateMessage('')
+      return
+    }
+    if (nextName.length < MIN_DISPLAY_NAME_LENGTH) {
+      setDisplayNameUpdateError(`Display name must be at least ${MIN_DISPLAY_NAME_LENGTH} characters.`)
+      setDisplayNameUpdateMessage('')
+      return
+    }
+    if (nextName.length > MAX_DISPLAY_NAME_LENGTH) { // shouldn't happen due to input limit
+      setDisplayNameUpdateError(`Display name must be ${MAX_DISPLAY_NAME_LENGTH} characters or fewer.`)
+      setDisplayNameUpdateMessage('')
+      return
+    }
+    setDisplayNameUpdateError('')
+    setDisplayNameUpdateMessage('')
+    setIsUpdatingDisplayName(true)
+    try {
+      await api.patch('/api/account/profile', { displayName: nextName })
+      await reload(auth.currentUser)
+      setAuthUser(auth.currentUser ? { ...auth.currentUser } : null)
+      setDisplayNameUpdateMessage('Display name updated.')
+      setDisplayNameInput(auth.currentUser?.displayName || nextName)
+    } catch (error) {
+      const serverMessage = error?.response?.data?.error
+      if (error?.code === 'auth/requires-recent-login') { // could add other common errors here
+        setDisplayNameUpdateError('Please sign in again before updating your display name.')
+      } else {
+        setDisplayNameUpdateError(serverMessage || error?.message || 'Failed to update display name.')
+      }
+    } finally {
+      setIsUpdatingDisplayName(false)
+    }
+  }
+
+  const openNoteEditor = (book) => {
+    setNoteEditorBook(book)
+    setNoteEditorValue(book.note || '')
+    setNoteEditorError('')
+  }
+
+  const closeNoteEditor = () => {
+    if (isSavingNote) return
+    setNoteEditorBook(null)
+    setNoteEditorValue('')
+    setNoteEditorError('')
+  }
+
+  const handleNoteEditorChange = (event) => {
+    setNoteEditorValue(event.target.value)
+    if (noteEditorError) setNoteEditorError('')
+  }
+
+  const handleSaveNote = async () => {
+    if (!authUser || !noteEditorBook) return
+    const normalized = noteEditorValue.replace(/\r\n/g, '\n')
+    if (normalized.length > NOTE_MAX_LENGTH) {
+      setNoteEditorError(`Notes must be ${NOTE_MAX_LENGTH} characters or fewer.`) // shouldn't happen due to input limit
+      return
+    }
+    if (normalized && !NOTE_ALLOWED_REGEX.test(normalized)) {
+      setNoteEditorError('Notes may only include standard keyboard characters.')
+      return
+    }
+    setIsSavingNote(true)
+    try {
+      const trimmedNote = normalized.trim()
+      pagesCacheRef.current = {}
+      await api.put(`/api/books/${noteEditorBook.id}`, {
+        note: trimmedNote ? trimmedNote : ''
+      })
+      await fetchAndCache(currentPage, { showLoading: true })
+      closeNoteEditor()
+    } catch (error) {
+      const message = error?.response?.data?.error || 'Failed to save note.'
+      setNoteEditorError(message)
+    } finally {
+      setIsSavingNote(false)
+    }
+  }
+
   const toggleAuthMode = () => {
     setAuthMode((previous) => (previous === 'login' ? 'register' : 'login'))
     setAuthError('')
     setAuthPassword('')
     setAuthDisplayName('')
+    setPasswordResetError('')
+    setPasswordResetMessage('')
   }
 
   const handleSignOut = async () => {
@@ -491,8 +646,10 @@ export default function App() {
     return (
       <div className="auth-shell">
         <div className="panel auth-panel">
-          <h1 className="auth-title">BookTracker</h1>
-          <p className="panel-description">Sign in to manage your library.</p>
+          <div className="auth-copy">
+            <h1 className="auth-title">BookTracker</h1>
+            <p className="panel-description">Sign in to manage your library.</p>
+          </div>
           {authError && <p className="text-error">{authError}</p>}
           <form className="auth-form" onSubmit={handleAuthSubmit}>
             {authMode === 'register' && (
@@ -501,6 +658,7 @@ export default function App() {
                 <input
                   id="auth-display-name"
                   className="form-input"
+                  maxLength={MAX_DISPLAY_NAME_LENGTH}
                   value={authDisplayName}
                   onChange={(event) => setAuthDisplayName(event.target.value)}
                   placeholder="What should we call you?"
@@ -513,6 +671,7 @@ export default function App() {
                 id="auth-email"
                 type="email"
                 required
+                maxLength={MAX_EMAIL_LENGTH}
                 className="form-input"
                 value={authEmail}
                 onChange={(event) => setAuthEmail(event.target.value)}
@@ -525,7 +684,8 @@ export default function App() {
                 id="auth-password"
                 type="password"
                 required
-                minLength={6}
+                minLength={MIN_PASSWORD_LENGTH}
+                maxLength={MAX_PASSWORD_LENGTH}
                 className="form-input"
                 value={authPassword}
                 onChange={(event) => setAuthPassword(event.target.value)}
@@ -536,6 +696,20 @@ export default function App() {
               {isAuthSubmitting ? (authMode === 'register' ? 'Creating account...' : 'Signing in...') : authMode === 'register' ? 'Create account' : 'Sign in'}
             </button>
           </form>
+          {authMode === 'login' && (
+            <>
+              <button
+                className="auth-forgot-link"
+                type="button"
+                onClick={handlePasswordResetRequest}
+                disabled={isSendingPasswordReset}
+              >
+                {isSendingPasswordReset ? 'Sending reset email...' : 'Forgot password?'}
+              </button>
+              {passwordResetMessage && <p className="success-text">{passwordResetMessage}</p>}
+              {passwordResetError && <p className="text-error">{passwordResetError}</p>}
+            </>
+          )}
           <button className="auth-mode-toggle" type="button" onClick={toggleAuthMode}>
             {authMode === 'login' ? 'Need an account? Register instead' : 'Have an account? Sign in'}
           </button>
@@ -556,8 +730,10 @@ export default function App() {
     return (
       <div className="auth-shell">
         <div className="panel auth-panel">
-          <h1 className="auth-title">Verify your email</h1>
-          <p className="panel-description">We sent a confirmation link to <strong>{authUser.email}</strong>. Please verify your email.</p>
+          <div className="auth-copy">
+            <h1 className="auth-title">Verify your email</h1>
+            <p className="panel-description">We sent a confirmation link to <strong>{authUser.email}</strong>. Please verify your email.</p>
+          </div>
           {authError && <p className="text-error">{authError}</p>}
           {verificationMessage && <p className="verification-message">{verificationMessage}</p>}
           <div className="verification-actions">
@@ -603,18 +779,31 @@ export default function App() {
           >
             {isDarkMode ? 'Light mode' : 'Dark mode'}
           </button>
-          <button className="btn btn-secondary signout-button" type="button" onClick={handleSignOut}>
-            Sign out
-          </button>
-          <button className="btn btn-danger hdelete" type="button" onClick={openAccountDeleteModal}>
-            Delete account
-          </button>
         </div>
       </header>
 
+      <nav className="app-nav" aria-label="Primary">
+        <button
+          type="button"
+          className={`app-nav-button ${activeView === 'library' ? 'is-active' : ''}`}
+          onClick={() => setActiveView('library')}
+        >
+          Library
+        </button>
+        <button
+          type="button"
+          className={`app-nav-button ${activeView === 'account' ? 'is-active' : ''}`}
+          onClick={() => setActiveView('account')}
+        >
+          Account
+        </button>
+      </nav>
+
       <main className="layout-main">
-        {authError && <p className="text-error auth-inline-error">{authError}</p>}
-        <section className="panel panel-list">
+        {activeView === 'library' ? (
+        <>
+          {authError && <p className="text-error auth-inline-error">{authError}</p>}
+          <section className="panel panel-list">
           <div className="panel-header">
             <div>
               <h2 className="panel-title">Your library</h2>
@@ -652,14 +841,6 @@ export default function App() {
                   <option value="1">1+ stars</option>
                 </select>
               </div>
-              <div className="filter-field">
-                <label className="input-label" htmlFor="page-size">Page size</label>
-                <select id="page-size" className="form-input filter-select" value={pageSize} onChange={handlePageSizeChange}>
-                  <option value={5}>5 / page</option>
-                  <option value={10}>10 / page</option>
-                  <option value={20}>20 / page</option>
-                </select>
-              </div>
               <div className="filter-actions">
                 <button className="btn btn-primary" type="submit">Search</button>
                 <button className="btn btn-secondary" type="button" onClick={handleClearFilters}>Reset</button>
@@ -693,42 +874,53 @@ export default function App() {
                   onSort={handleSortToggle}
                   onEditBook={handleEditBook}
                   onDeleteBook={requestDeleteBook}
+                  onEditNote={openNoteEditor}
                 />
               </div>
-              <div className="pagination-controls">
-                {currentPage > 1 && (
-                  <button
-                    className="btn btn-secondary"
-                    type="button"
-                    onClick={() => {
-                      if (listRef.current) {
-                        minHeightRef.current = listRef.current.offsetHeight
-                        listRef.current.style.minHeight = `${minHeightRef.current}px`
-                      }
-                      setCurrentPage((previous) => Math.max(1, previous - 1))
-                    }}
-                  >
-                    Previous
-                  </button>
-                )}
+              <div className="panel-footer">
+                <div className="pagination-controls">
+                  {currentPage > 1 && (
+                    <button
+                      className="btn btn-secondary"
+                      type="button"
+                      onClick={() => {
+                        if (listRef.current) {
+                          minHeightRef.current = listRef.current.offsetHeight
+                          listRef.current.style.minHeight = `${minHeightRef.current}px`
+                        }
+                        setCurrentPage((previous) => Math.max(1, previous - 1))
+                      }}
+                    >
+                      Previous
+                    </button>
+                  )}
 
-                <span className="pagination-info">Page {paginationInfo.page} of {paginationInfo.totalPages}</span>
+                  <span className="pagination-info">Page {paginationInfo.page} of {paginationInfo.totalPages}</span>
 
-                {paginationInfo.page < paginationInfo.totalPages && (
-                  <button
-                    className="btn btn-secondary"
-                    type="button"
-                    onClick={() => {
-                      if (listRef.current) {
-                        minHeightRef.current = listRef.current.offsetHeight
-                        listRef.current.style.minHeight = `${minHeightRef.current}px`
-                      }
-                      setCurrentPage((previous) => previous + 1)
-                    }}
-                  >
-                    Next
-                  </button>
-                )}
+                  {paginationInfo.page < paginationInfo.totalPages && (
+                    <button
+                      className="btn btn-secondary"
+                      type="button"
+                      onClick={() => {
+                        if (listRef.current) {
+                          minHeightRef.current = listRef.current.offsetHeight
+                          listRef.current.style.minHeight = `${minHeightRef.current}px`
+                        }
+                        setCurrentPage((previous) => previous + 1)
+                      }}
+                    >
+                      Next
+                    </button>
+                  )}
+                </div>
+                <div className="page-size-control">
+                  <label className="page-size-label" htmlFor="page-size">Rows per page</label>
+                  <select id="page-size" className="form-input page-size-select" value={pageSize} onChange={handlePageSizeChange}>
+                    <option value={5}>5</option>
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                  </select>
+                </div>
               </div>
             </>
           )}
@@ -736,7 +928,7 @@ export default function App() {
       </section>
 
         <div className="panel">
-          <h2 className="panel-title">AI recommendations</h2>
+        <h2 className="panel-title">AI recommendations</h2>
 
           <div className="recommendations-actions">
             <button
@@ -750,7 +942,7 @@ export default function App() {
 
             {recommendationsSource && !recommendationsError && recommendations.length > 0 && (
               <span className="recommendations-source">
-                Source: {recommendationsSource.startsWith('ai') ? 'AI model' : recommendationsSource}
+                Source: {recommendationsSource.startsWith('ai') ? 'Google Gemini' : recommendationsSource}
               </span>
             )}
           </div>
@@ -777,7 +969,113 @@ export default function App() {
           )}
 
         </div>
+        </>
+      ) : (
+        <section className="panel account-panel">
+          <h2 className="panel-title">Account</h2>
+          <p className="panel-subtitle">Manage your profile and security settings.</p>
+          <div className="account-card">
+            <div className="account-info">
+              <div>
+                <p className="account-label">Signed in as</p>
+                <p className="account-value">{authUser?.email}</p>
+              </div>
+              {authUser?.displayName && (
+                <div>
+                  <p className="account-label">Display name</p>
+                  <p className="account-value">{authUser.displayName}</p>
+                </div>
+              )}
+            </div>
+            <div className="account-actions">
+              <button className="btn btn-secondary" type="button" onClick={handleSignOut}>
+                Sign out
+              </button>
+              <button className="btn btn-danger" type="button" onClick={openAccountDeleteModal}>
+                Delete account
+              </button>
+            </div>
+          </div>
+
+          <div className="account-card">
+            <h3 className="account-card-title">Display name</h3>
+            <p className="account-card-subtitle">Update the name associated with your account.</p>
+            <form className="account-form" onSubmit={handleDisplayNameUpdate}>
+              <label className="form-label" htmlFor="display-name-input">Display name</label>
+              <input
+                id="display-name-input"
+                className="form-input"
+                maxLength={MAX_DISPLAY_NAME_LENGTH}
+                value={displayNameInput}
+                onChange={(event) => {
+                  setDisplayNameInput(event.target.value)
+                  setDisplayNameUpdateError('')
+                  setDisplayNameUpdateMessage('')
+                }}
+                placeholder="John Doe"
+              />
+              <p className="field-hint">Max {MAX_DISPLAY_NAME_LENGTH} characters.</p>
+              <button
+                className="btn btn-primary"
+                type="submit"
+                disabled={
+                  isUpdatingDisplayName ||
+                  !displayNameInput.trim() ||
+                  displayNameInput.trim().length < MIN_DISPLAY_NAME_LENGTH ||
+                  displayNameInput.trim().length > MAX_DISPLAY_NAME_LENGTH ||
+                  displayNameInput.trim() === (authUser?.displayName || '').trim()
+                }
+              >
+                {isUpdatingDisplayName ? 'Saving...' : 'Save display name'}
+              </button>
+            </form>
+            {displayNameUpdateMessage && <p className="success-text">{displayNameUpdateMessage}</p>}
+            {displayNameUpdateError && <p className="text-error">{displayNameUpdateError}</p>}
+            <p className="account-reset-note">
+              If you need to change your password, sign out, then use “Forgot password?” on the sign-in screen to send a reset link.
+            </p>
+          </div>
+        </section>
+      )}
       </main>
+
+      {noteEditorBook && (
+        <div className="modal-backdrop">
+          <div className="modal note-modal" role="dialog" aria-modal="true">
+            <h3 className="modal-title">Notes for {noteEditorBook.title}</h3>
+            <textarea
+              className="form-input note-textarea"
+              rows={6}
+              maxLength={NOTE_MAX_LENGTH}
+              value={noteEditorValue}
+              onChange={handleNoteEditorChange}
+              placeholder="Capture your thoughts, quotes, or impressions about ths book."
+            />
+            <div className="note-field-meta">
+              <span className="note-counter">{noteEditorValue.length}/{NOTE_MAX_LENGTH}</span>
+            </div>
+            {noteEditorError && <p className="text-error">{noteEditorError}</p>}
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={closeNoteEditor}
+                disabled={isSavingNote}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleSaveNote}
+                disabled={isSavingNote}
+              >
+                {isSavingNote ? 'Saving...' : 'Save notes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {bookPendingDeletion && (
         <div className="modal-backdrop">

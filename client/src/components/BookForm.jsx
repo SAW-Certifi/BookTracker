@@ -7,7 +7,8 @@ const defaultFormValues = {
   personalRating: '',
   communityRating: '',
   openLibraryWorkKey: '',
-  openLibraryEditionKey: ''
+  openLibraryEditionKey: '',
+  note: ''
 }
 
 const toFormValues = (book) => ({
@@ -31,7 +32,8 @@ const toFormValues = (book) => ({
     return String(Math.round(numeric * 100) / 100)
   })(),
   openLibraryWorkKey: book?.openLibraryWorkKey ?? '',
-  openLibraryEditionKey: book?.openLibraryEditionKey ?? ''
+  openLibraryEditionKey: book?.openLibraryEditionKey ?? '',
+  note: book?.note ?? ''
 })
 
 const buildAuthorString = (names = []) => {
@@ -41,12 +43,29 @@ const buildAuthorString = (names = []) => {
 }
 
 const OPEN_LIBRARY_ENDPOINT = 'https://openlibrary.org/search.json'
-const SEARCH_FIELDS = 'key,title,author_name,first_publish_year,cover_i,edition_key,cover_edition_key,ratings_average,ratings_sortable,ratings_count'
+const SEARCH_FIELDS = 'key,title,author_name,first_publish_year,cover_i,edition_key,cover_edition_key,ratings_average,ratings_sortable,ratings_count,language,edition_count'
+const ENGLISH_LANGUAGE_CODES = new Set(['eng'])
+const MAX_AUTHOR_LOOKUPS = 3
+const NOTE_MAX_LENGTH = 1200
+const NOTE_ALLOWED_REGEX = /^[\n\r\t -~]*$/
 
 const resolveOpenLibraryUrl = (workKey = '') => {
   if (!workKey) return null
   if (/^https?:\/\//i.test(workKey)) return workKey
   return `https://openlibrary.org${workKey.startsWith('/') ? workKey : `/works/${workKey}`}`
+}
+
+const resolveEditionUrl = (editionKey = '') => {
+  if (!editionKey) return null
+  if (/^https?:\/\//i.test(editionKey)) return editionKey
+  const normalized = editionKey.replace(/\.json$/i, '')
+  return `https://openlibrary.org${normalized.startsWith('/books/') ? normalized : `/books/${normalized}`}`
+}
+
+const extractEditionKey = (input = '') => {
+  if (!input) return ''
+  const match = String(input).trim().match(/OL\d+M/i)
+  return match ? match[0].toUpperCase() : ''
 }
 
 const formatRatingValue = (value) => {
@@ -66,6 +85,9 @@ export default function BookForm({ initialBook, onCancel, onSubmit, existingWork
   const [searchError, setSearchError] = useState('')
   const [selectedResultKey, setSelectedResultKey] = useState('')
   const [isResultsVisible, setIsResultsVisible] = useState(false)
+  const [manualLinkInput, setManualLinkInput] = useState('')
+  const [manualImportError, setManualImportError] = useState('')
+  const [isImportingEdition, setIsImportingEdition] = useState(false)
   const searchAreaRef = useRef(null)
 
   const isEditing = Boolean(initialBook)
@@ -86,6 +108,8 @@ export default function BookForm({ initialBook, onCancel, onSubmit, existingWork
     setSearchError('')
     setSelectedResultKey(initialBook?.openLibraryWorkKey ?? '')
     setIsResultsVisible(false)
+    setManualLinkInput('')
+    setManualImportError('')
   }, [initialBook])
 
   useEffect(() => {
@@ -131,6 +155,14 @@ export default function BookForm({ initialBook, onCancel, onSubmit, existingWork
         errors.personalRating = 'Personal rating must be between 0 and 5'
       }
     }
+    const rawNote = formValues.note || ''
+    const normalizedNote = rawNote.replace(/\r\n/g, '\n')
+    const trimmedNote = normalizedNote.trim()
+    if (normalizedNote && !NOTE_ALLOWED_REGEX.test(normalizedNote)) {
+      errors.note = 'Notes may only use normal charcters.'
+    } else if (trimmedNote && trimmedNote.length > NOTE_MAX_LENGTH) {
+      errors.note = `Notes must be ${NOTE_MAX_LENGTH} characters or fewer`
+    }
     setValidationErrors(errors)
     return Object.keys(errors).length === 0
   }
@@ -147,6 +179,9 @@ export default function BookForm({ initialBook, onCancel, onSubmit, existingWork
     }
     const workKey = formValues.openLibraryWorkKey.trim()
     const editionKey = formValues.openLibraryEditionKey.trim()
+    const normalizedNote = formValues.note.replace(/\r\n/g, '\n')
+    const trimmedNote = normalizedNote.trim()
+    payload.note = trimmedNote ? trimmedNote : ''
 
     if (workKey) {
       payload.openLibraryWorkKey = workKey
@@ -170,6 +205,8 @@ export default function BookForm({ initialBook, onCancel, onSubmit, existingWork
       setSearchError('')
       setSelectedResultKey('')
       setIsResultsVisible(false)
+      setManualLinkInput('')
+      setManualImportError('')
     }
   }
 
@@ -199,6 +236,8 @@ export default function BookForm({ initialBook, onCancel, onSubmit, existingWork
     setSelectedResultKey('')
     setIsResultsVisible(false)
     setValidationErrors({})
+    setManualLinkInput('')
+    setManualImportError('')
     onCancel?.()
   }
 
@@ -211,6 +250,11 @@ export default function BookForm({ initialBook, onCancel, onSubmit, existingWork
     if (!value.trim()) {
       setSearchResults([])
     }
+  }
+
+  const handleManualLinkChange = (event) => {
+    setManualLinkInput(event.target.value)
+    if (manualImportError) setManualImportError('')
   }
 
   const handleSearch = async () => {
@@ -255,10 +299,25 @@ export default function BookForm({ initialBook, onCancel, onSubmit, existingWork
             title: doc.title,
             author,
             year: doc.first_publish_year ?? '',
-            communityRating: communityRatingValue
+            communityRating: communityRatingValue,
+            languages: Array.isArray(doc.language) ? doc.language : [],
+            editionCount: typeof doc.edition_count === 'number' ? doc.edition_count : 0
           }
         })
         .filter(Boolean)
+        .sort((a, b) => {
+          const aEnglish = a.languages.some((code) => ENGLISH_LANGUAGE_CODES.has(code)) ? 0 : 1
+          const bEnglish = b.languages.some((code) => ENGLISH_LANGUAGE_CODES.has(code)) ? 0 : 1
+          if (aEnglish !== bEnglish) return aEnglish - bEnglish
+          const lowered = trimmed.toLowerCase()
+          const aExact = a.title.toLowerCase() === lowered ? 0 : 1
+          const bExact = b.title.toLowerCase() === lowered ? 0 : 1
+          if (aExact !== bExact) return aExact - bExact
+          const aYear = Number(a.year) || Number.POSITIVE_INFINITY
+          const bYear = Number(b.year) || Number.POSITIVE_INFINITY
+          if (aYear !== bYear) return aYear - bYear
+          return b.editionCount - a.editionCount
+        })
 
       setSearchResults(normalized)
       setIsResultsVisible(Boolean(normalized.length))
@@ -309,6 +368,64 @@ export default function BookForm({ initialBook, onCancel, onSubmit, existingWork
     setIsResultsVisible(false)
   }
 
+  const fetchAuthorNames = async (authorRefs = []) => {
+    if (!Array.isArray(authorRefs) || !authorRefs.length) return []
+    const lookups = authorRefs
+      .filter((ref) => ref?.key)
+      .slice(0, MAX_AUTHOR_LOOKUPS)
+      .map(async (ref) => {
+        try {
+          const response = await fetch(`https://openlibrary.org${ref.key}.json`)
+          if (!response.ok) return ''
+          const data = await response.json()
+          return data?.name || ''
+        } catch (error) {
+          console.error('Failed to fetch author info', error)
+          return ''
+        }
+      })
+    const names = await Promise.all(lookups)
+    return names.filter(Boolean)
+  }
+
+  const handleImportFromOpenLibrary = async () => {
+    const editionKey = extractEditionKey(manualLinkInput)
+    if (!editionKey) {
+      setManualImportError('Enter a valid Open Library book URL or ID (e.g., OL32482502M).')
+      return
+    }
+    setIsImportingEdition(true)
+    setManualImportError('')
+    try {
+      const response = await fetch(`https://openlibrary.org/books/${editionKey}.json`)
+      if (!response.ok) throw new Error(`Edition lookup failed with ${response.status}`)
+      const edition = await response.json()
+      const workKey = edition?.works?.[0]?.key || ''
+      const authorNames = await fetchAuthorNames(edition?.authors)
+      const publishDate = edition?.publish_date || ''
+      const yearMatch = publishDate.match(/(\d{4})/)
+      const yearValue = yearMatch ? yearMatch[1] : ''
+
+      setFormValues((prev) => ({
+        ...prev,
+        title: edition?.title || prev.title,
+        author: authorNames.length ? buildAuthorString(authorNames) : prev.author,
+        year: yearValue || prev.year,
+        openLibraryWorkKey: workKey || prev.openLibraryWorkKey,
+        openLibraryEditionKey: editionKey,
+        communityRating: ''
+      }))
+      setSelectedResultKey(workKey || '')
+      setIsResultsVisible(false)
+      setManualLinkInput('')
+    } catch (error) {
+      console.error('Failed to import edition from Open Library', error)
+      setManualImportError('Could not import details from that link.')
+    } finally {
+      setIsImportingEdition(false)
+    }
+  }
+
   return (
     <form onSubmit={handleSubmit} className="book-form" noValidate>
       <div className="form-row" ref={searchAreaRef}>
@@ -330,6 +447,26 @@ export default function BookForm({ initialBook, onCancel, onSubmit, existingWork
           >
             {isSearching ? 'Searching...' : 'Search'}
           </button>
+        </div>
+        <div className="manual-import-section">
+          <div className="manual-import-controls">
+            <input
+              type="text"
+              className="form-input manual-import-input"
+              placeholder="Paste Open Library book URL or ID (e.g., https://openlibrary.org/books/OL32482502M)"
+              value={manualLinkInput}
+              onChange={handleManualLinkChange}
+            />
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleImportFromOpenLibrary}
+              disabled={isImportingEdition}
+            >
+              {isImportingEdition ? 'Importing...' : 'Import from link'}
+            </button>
+          </div>
+          {manualImportError && <p className="form-error">{manualImportError}</p>}
         </div>
         {searchError && <p className="form-error">{searchError}</p>}
 
@@ -369,30 +506,46 @@ export default function BookForm({ initialBook, onCancel, onSubmit, existingWork
                 ratingSnippet ? `(Community: ${ratingSnippet}/5)` : ''
               ].filter(Boolean)
               const description = descriptionParts.join(' | ')
+              const openLibraryUrl =
+                result.editionKey ? resolveEditionUrl(result.editionKey) : resolveOpenLibraryUrl(result.workKey)
               return (
                 <li key={result.workKey}>
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={isSelected}
-                    className={`search-result-button${isSelected ? ' is-selected' : ''}${isExisting ? ' is-existing' : ''}`}
-                    onClick={() => handleSelectResult(result)}
-                  >
-                    <span className="result-title">
-                      {result.title}
-                      {isExisting && (
-                        <span
-                          className="result-indicator"
-                          aria-label="Already in your library"
-                          title="Already in your library"
-                          role="img"
-                        >
-                          (saved)
-                        </span>
-                      )}
-                    </span>
-                    <span className="result-meta">{description}</span>
-                  </button>
+                  <div className="search-result-row">
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      className={`search-result-button${isSelected ? ' is-selected' : ''}${isExisting ? ' is-existing' : ''}`}
+                      onClick={() => handleSelectResult(result)}
+                    >
+                      <span className="result-title">
+                        {result.title}
+                        {isExisting && (
+                          <span
+                            className="result-indicator"
+                            aria-label="Already in your library"
+                            title="Already in your library"
+                            role="img"
+                          >
+                            (saved)
+                          </span>
+                        )}
+                      </span>
+                      <span className="result-meta">{description}</span>
+                    </button>
+                    {openLibraryUrl && (
+                      <a
+                        className="result-open-button"
+                        href={openLibraryUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={`Open ${result.title} on Open Library`}
+                        title="Open on Open Library"
+                      >
+                        ↗
+                      </a>
+                    )}
+                  </div>
                 </li>
               )
             })}
@@ -454,6 +607,25 @@ export default function BookForm({ initialBook, onCancel, onSubmit, existingWork
           aria-disabled="true"
         />
       </div>
+      <div className="form-row note-input-row">
+        <div className="note-input-wrapper">
+          <label className="form-label" htmlFor="book-note">Notes</label>
+          <textarea
+            id="book-note"
+            className="form-input note-textarea"
+            rows={8}
+            maxLength={NOTE_MAX_LENGTH}
+            value={formValues.note}
+            onChange={handleFieldChange('note')}
+            placeholder="Add your thoughts, favorite quotes, or reminders."
+          />
+          <div className="note-field-meta">
+            <span className="note-hint">Plain text only. Use this space for personal notes.</span>
+            <span className="note-counter">{formValues.note.length}/{NOTE_MAX_LENGTH}</span>
+          </div>
+          {validationErrors.note && <p className="form-error">{validationErrors.note}</p>}
+        </div>
+      </div>
       <div className="form-actions">
         <button className="btn btn-primary" type="submit">
           {initialBook ? 'Save' : 'Create'}
@@ -467,7 +639,3 @@ export default function BookForm({ initialBook, onCancel, onSubmit, existingWork
     </form>
   )
 }
-
-
-
-
