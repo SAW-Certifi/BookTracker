@@ -9,7 +9,25 @@ const parseOptionalNumber = (value) => {
   if (value === undefined || value === null || value === '') return undefined
   const numeric = Number(value)
   return Number.isFinite(numeric) ? numeric : undefined
-} 
+}
+
+const NOTE_MAX_LENGTH = 1200
+const NOTE_ALLOWED_REGEX = /^[\n\r\t -~]*$/
+
+const evaluateNoteInput = (value) => {
+  if (value === undefined) return { action: 'skip' }
+  if (typeof value !== 'string') return { error: 'Note must be text.' }
+  const normalized = value.replace(/\r\n/g, '\n')
+  const trimmed = normalized.trim()
+  if (!trimmed) return { action: 'unset' }
+  if (trimmed.length > NOTE_MAX_LENGTH) {
+    return { error: `Notes must be ${NOTE_MAX_LENGTH} characters or fewer.` }
+  }
+  if (!NOTE_ALLOWED_REGEX.test(trimmed)) {
+    return { error: 'Notes may only have standard characters.' }
+  }
+  return { action: 'set', value: trimmed }
+}
 
 // get all with basic search, filter, and pagination
 router.get('/', async (req, res, next) => {
@@ -86,7 +104,8 @@ router.post('/', async (req, res, next) => {
       personalRating,
       communityRating,
       openLibraryWorkKey,
-      openLibraryEditionKey
+      openLibraryEditionKey,
+      note
     } = req.body
     if (!title || !author)
       return res.status(400).json({ error: 'title and author required' })
@@ -111,6 +130,12 @@ router.post('/', async (req, res, next) => {
     if (normalizedWorkKey) payload.openLibraryWorkKey = normalizedWorkKey
     if (normalizedEditionKey) payload.openLibraryEditionKey = normalizedEditionKey
 
+    const noteEvaluation = evaluateNoteInput(note)
+    if (noteEvaluation.error) {
+      return res.status(400).json({ error: noteEvaluation.error })
+    }
+    if (noteEvaluation.action === 'set') payload.note = noteEvaluation.value
+
     const created = await Book.create(payload)
     res.status(201).json(created)
   } catch (err) { next(err) }
@@ -128,7 +153,8 @@ router.put('/:id', async (req, res, next) => {
       personalRating,
       communityRating,
       openLibraryWorkKey,
-      openLibraryEditionKey
+      openLibraryEditionKey,
+      note
     } = req.body
 
     const setPayload = {}
@@ -161,6 +187,15 @@ router.put('/:id', async (req, res, next) => {
       const normalized = typeof openLibraryEditionKey === 'string' ? openLibraryEditionKey.trim() : ''
       if (normalized) setPayload.openLibraryEditionKey = normalized
       else unsetPayload.openLibraryEditionKey = 1
+    }
+
+    if (note !== undefined) {
+      const noteEvaluation = evaluateNoteInput(note)
+      if (noteEvaluation.error) {
+        return res.status(400).json({ error: noteEvaluation.error })
+      } // wrap
+      if (noteEvaluation.action === 'unset') unsetPayload.note = 1
+      else if (noteEvaluation.action === 'set') setPayload.note = noteEvaluation.value
     }
 
     const updatePayload = {}
